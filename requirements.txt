@@ -1,0 +1,7 @@
+customtkinter
+psycopg2-binary
+requests
+beautifulsoup4
+lxml
+urllib3
+reportlab
