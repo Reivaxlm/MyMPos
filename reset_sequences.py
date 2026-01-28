@@ -1,7 +1,3 @@
-"""
-Script seguro para resetear sequences en Postgres (excepto 'usuarios' y 'productos').
-Ajusta las credenciales al final del archivo o pásalas por variables de entorno.
-"""
 from database import Database
 from psycopg2 import sql
 
