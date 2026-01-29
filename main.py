@@ -72,8 +72,22 @@ class MyMPos(ctk.CTk):
 
     def mostrar_ventas(self):
         self.limpiar_pantalla()
-        # --- CAMBIO CLAVE: Crear un marco con scroll para que quepa TODO ---
-        # Este contenedor permitirá bajar y subir si el contenido es muy grande
+        self.carrito = {} # Reiniciar carrito al entrar a la vista
+
+        # --- ESTILO TIPO CLIENTE (OSCURO) ---
+        style = ttk.Style()
+        style.theme_use("clam") 
+        style.configure("Treeview",
+            background="#2b2b2b",
+            foreground="white",
+            fieldbackground="#2b2b2b",
+            rowheight=35, # Un poco más alta para que se vea pro
+            borderwidth=0,
+            font=("Roboto", 11)
+        )
+        style.configure("Treeview.Heading", background="#333333", foreground="white", relief="flat")
+        style.map("Treeview", background=[('selected', '#e74c3c')]) # Rojo al seleccionar para borrar
+
         self.scroll_container = ctk.CTkScrollableFrame(self.contenedor, fg_color="transparent")
         self.scroll_container.pack(fill="both", expand=True)
         
@@ -139,18 +153,38 @@ class MyMPos(ctk.CTk):
         self.btn_cliente = ctk.CTkButton(cliente_inner, text="Cliente: Consumidor Final", width=300, height=36, fg_color="#1976d2", command=self._seleccionar_cliente)
         self.btn_cliente.pack(side='left')
 
-        # --- TABLA DEL CARRITO ---
-        self.columnas_cart = ("cant", "producto", "precio", "subtotal")
+        # --- CONFIGURACIÓN DE ESTILO PARA EL CARRITO ---
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("Treeview",
+            background="#2b2b2b",
+            foreground="white",
+            rowheight=30,
+            fieldbackground="#2b2b2b",
+            borderwidth=0
+        )
+        style.map("Treeview", background=[('selected', '#1f538d')])
+
+       # 2. TABLA CON COLUMNA "ACCIÓN"
+        self.columnas_cart = ("cant", "producto", "precio", "subtotal", "accion")
         self.tabla_cart = ttk.Treeview(self.scroll_container, columns=self.columnas_cart, show="headings", height=10)
         
+        # Encabezados
         self.tabla_cart.heading("cant", text="CANT")
         self.tabla_cart.heading("producto", text="PRODUCTO")
         self.tabla_cart.heading("precio", text="PRECIO $")
         self.tabla_cart.heading("subtotal", text="SUBTOTAL $")
-        
-        self.tabla_cart.column("cant", width=50, anchor="center")
+        self.tabla_cart.heading("accion", text="ELIMINAR")
+
+        # Configurar columnas
+        self.tabla_cart.column("cant", width=60, anchor="center")
         self.tabla_cart.column("producto", width=300)
+        self.tabla_cart.column("accion", width=100, anchor="center")
+        
         self.tabla_cart.pack(pady=10, fill="x", padx=20)
+
+        # EVENTO: Doble clic para ejecutar la eliminación
+        self.tabla_cart.bind("<Double-1>", lambda event: self.eliminar_item_carrito())
 
         # Total
         self.lbl_total = ctk.CTkLabel(self.scroll_container, text="TOTAL: 0.00$", font=("Arial", 40, "bold"))
@@ -180,6 +214,16 @@ class MyMPos(ctk.CTk):
         # Estado inicial
         self.metodo_seleccionado = 'efectivo'
         self._update_payment_buttons()
+
+        # Forzar a la ventana a dibujar los widgets internos inmediatamente
+        self.update_idletasks()
+        self.after(100, lambda: self.scroll_container._parent_canvas.event_generate("<Configure>"))
+    
+    def _forzar_refresco_visual(self):
+        """Esta función despierta al ScrollableFrame para que no salga en blanco"""
+        self.scroll_container.update()
+        self.scroll_container._parent_canvas.configure(scrollregion=self.scroll_container._parent_canvas.bbox("all"))
+        self.scroll_container._parent_canvas.yview_moveto(0)
 
     def _filtrar_busqueda_combo(self, event):
         # Si presionas flecha abajo, vas a la lista
@@ -237,21 +281,28 @@ class MyMPos(ctk.CTk):
             self._refrescar_vista_carrito()
     
     def eliminar_item_carrito(self):
+        # 1. Verificamos qué fila está seleccionada
         seleccion = self.tabla_cart.selection()
-        if seleccion:
-            valores = self.tabla_cart.item(seleccion, "values")
-            nombre_prod = valores[1]
-            
-            # Borramos del diccionario buscando por el nombre
-            codigo_a_eliminar = None
-            for cod, info in self.carrito.items():
-                if info['nombre'] == nombre_prod:
-                    codigo_a_eliminar = cod
-                    break
-            
-            if codigo_a_eliminar:
-                del self.carrito[codigo_a_eliminar]
-                self._refrescar_vista_carrito()
+        if not seleccion:
+            messagebox.showwarning("Atención", "Por favor, selecciona un producto en la tabla para eliminarlo.")
+            return
+
+        # 2. Sacamos el nombre del producto (está en la columna 1)
+        valores = self.tabla_cart.item(seleccion, "values")
+        nombre_prod = valores[1]
+        
+        # 3. Lo buscamos en nuestro diccionario 'self.carrito' para borrarlo del "cerebro"
+        codigo_a_quitar = None
+        for cod, info in self.carrito.items():
+            if info['nombre'] == nombre_prod:
+                codigo_a_quitar = cod
+                break
+        
+        if codigo_a_quitar:
+            del self.carrito[codigo_a_quitar]
+            # IMPORTANTE: Actualizar la pantalla y el total
+            self.actualizar_total_interfaz()
+            self._refrescar_vista_carrito()
 
     def _mostrar_menu_contextual(self, event):
         # Selecciona la fila donde se hizo clic derecho
@@ -601,28 +652,34 @@ class MyMPos(ctk.CTk):
             self._refrescar_vista_carrito()
             self.entry_buscar.focus()
 
+    def actualizar_total_interfaz(self):
+        """Calcula el total y actualiza el label en pantalla"""
+        total = 0.0
+        for info in self.carrito.values():
+            total += float(info['subtotal'])
+        
+        if hasattr(self, 'lbl_total'):
+            self.lbl_total.configure(text=f"TOTAL: ${total:,.2f}")
+        return total
+
     def _refrescar_vista_carrito(self):
-        # 1. Limpiar la tabla usando TU variable self.tabla_cart
+        # Limpiar la tabla antes de rellenar
         for item in self.tabla_cart.get_children():
             self.tabla_cart.delete(item)
-        
-        # 2. Llenar con los datos del diccionario carrito
-        total_acumulado = 0
-        for codigo, datos in self.carrito.items():
-            # Calculamos el subtotal (puedes usar el que ya guardas o calcularlo aquí)
-            subtotal = datos['precio'] * datos['cantidad']
-            total_acumulado += subtotal
-            
-            # INSERTAR con tus columnas exactas: ("cant", "producto", "precio", "subtotal")
+
+        # Rellenar con lo que hay en el diccionario
+        for cod, info in self.carrito.items():
             self.tabla_cart.insert("", "end", values=(
-                datos['cantidad'],
-                datos['nombre'],
-                f"{datos['precio']:.2f}",
-                f"{subtotal:.2f}"
+                info['cantidad'], 
+                info['nombre'], 
+                f"{info['precio']:.2f}", 
+                f"{info['subtotal']:.2f}",
+                "❌ QUITAR" # Texto que sale al lado de cada producto
             ))
         
-        self.lbl_total.configure(text=f"TOTAL: ${total_acumulado:.2f}")
-
+        # Forzamos que la tabla se redibuje (esto evita el fondo blanco)
+        self.tabla_cart.update()
+        
     def _seleccionar_cliente(self):
         dlg = ClienteDialog(self, self.db)
         self.wait_window(dlg)
@@ -635,6 +692,7 @@ class MyMPos(ctk.CTk):
         else:
             self.current_client = None
             self.btn_cliente.configure(text="Cliente: Consumidor Final", fg_color="#1976d2")
+            
 
     def _on_metodo_pago_change(self, value):
         # antiguo handler (ya no usado) — mantener compatibilidad
@@ -669,6 +727,20 @@ class MyMPos(ctk.CTk):
                 btn.configure(fg_color="#2b2b2b", text_color="#d1d1d1")
 
     def finalizar_venta(self):
+        # 1. ¿Hay cajero?
+        if not hasattr(self, 'current_user') or self.current_user is None:
+            messagebox.showerror("Error", "Inicie sesión.")
+            return
+
+        # 2. ¿Hay productos?
+        if not self.tabla_cart.get_children():
+            messagebox.showwarning("Error", "Carrito vacío.")
+            return
+
+        # 3. ¿Seleccionó un cliente real?
+        if "Consumidor Final" in self.btn_cliente.cget("text"):
+            messagebox.showwarning("Cliente", "Seleccione un cliente de la lista.")
+            return
         """Procesa la venta, guarda en DB y abre la factura PDF automáticamente"""
         # 1. Verificación: ¿Hay algo que vender?
         if not self.carrito:
@@ -791,9 +863,6 @@ class MyMPos(ctk.CTk):
         c.drawRightString(width-50, y, f"Fecha: {fecha_str}")
         y -= 15
         
-        # --- INFO DEL CLIENTE (Ajustado a los nuevos índices) ---
-        # Según la consulta SQL sugerida:
-        # [0]:id, [1]:fecha, [2]:total, [3]:metodo, [4]:vendedor_uuid, [5]:referencia, [6]:nombre_cl, [7]:cedula_cl
         nombre_cl = venta[6] if (len(venta) > 6 and venta[6]) else "CONSUMIDOR FINAL"
         cedula_cl = venta[7] if (len(venta) > 7 and venta[7]) else "N/A"
         
@@ -804,9 +873,10 @@ class MyMPos(ctk.CTk):
         c.setFont("Helvetica", 10)
         c.drawString(x, y, f"CÉDULA/RIF: {cedula_cl}")
         
-        # Opcional: Mostrar una parte del Vendedor UUID si deseas
-        vendedor_txt = str(venta[4])[:8] if venta[4] else "S/V"
-        c.drawRightString(width-50, y, f"VENDEDOR: {vendedor_txt}")
+        # --- CAMBIO AQUÍ: Mostrar NOMBRE en lugar de UUID ---
+        # Si nuestra nueva consulta trae el nombre en la posición [8], lo usamos:
+        nombre_vendedor = venta[8] if len(venta) > 8 else str(venta[4])[:8]
+        c.drawRightString(width-50, y, f"VENDEDOR: {nombre_vendedor}")
         y -= 25
 
         # --- TABLA DE PRODUCTOS ---
@@ -875,6 +945,15 @@ class MyMPos(ctk.CTk):
         return path
     
     def ventana_cierre_turno(self):
+        pregunta = messagebox.askyesno(
+            "Confirmar Cierre", 
+            "¿Estás seguro de que deseas cerrar el turno actual?\n\n"
+            "Esto generará el reporte de ventas totales de hoy."
+        )
+        
+        if not pregunta: # Si presiona "No"
+            return
+
         usuario_id = self.current_user[0] if self.current_user else "1"
         nombre_cajero = self.current_user[1] if self.current_user else "Luis"
         datos_cierre = self.db.obtener_cierre_cajero(usuario_id)
@@ -915,6 +994,7 @@ class MyMPos(ctk.CTk):
                                  command=lambda: self.imprimir_ticket_cierre(datos_cierre, total_usd, top))
         btn_print.pack(pady=20, padx=30, fill="x")
 
+        
     def imprimir_ticket_cierre(self, datos, total_general, ventana_padre):
         from reportlab.lib.pagesizes import letter
         from reportlab.pdfgen import canvas

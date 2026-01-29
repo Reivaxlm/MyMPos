@@ -253,22 +253,19 @@ class Database:
             with self.get_cursor() as cur:
                 cur.execute("""
                     SELECT 
-                        v.id,           -- [0]
-                        v.fecha,        -- [1]
-                        v.total,        -- [2]
-                        v.metodo_pago,  -- [3]
-                        v.vendedor_id,  -- [4] (Es un UUID)
-                        v.referencia,   -- [5]
-                        c.nombre,       -- [6] (Viene de la tabla clientes)
-                        c.cedula        -- [7] (Viene de la tabla clientes)
+                        v.id, v.fecha, v.total, v.metodo_pago, v.vendedor_id, v.referencia,
+                        c.nombre as cliente_nombre, c.cedula as cliente_cedula,
+                        u.nombre as vendedor_nombre
                     FROM public.ventas v
                     LEFT JOIN public.clientes c ON v.cliente_id = c.id
+                    LEFT JOIN public.usuarios u ON v.vendedor_id::text = u.id::text
                     WHERE v.id = %s
                 """, (venta_id,))
                 return cur.fetchone()
         except Exception as e:
-            print(f"Error en consulta de venta: {e}")
+            print(f"Error al obtener venta: {e}")
             return None
+        
     def obtener_items_venta(self, venta_id):
         try:
             with self.get_cursor() as cur:
