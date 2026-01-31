@@ -15,33 +15,58 @@ class MyMPos(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.db = Database()
-        # Intentamos obtener la tasa; si falla, usar la tasa guardada o 1.0
         self.tasa = obtener_tasa_bcv(self) or self.db.obtener_tasa_guardada() or 1.0
-        # carrito será un dict: {codigo: {'nombre', 'precio', 'cantidad', 'subtotal'}}
         self.carrito = {}
 
         self.title("MyMPos - Sistema de Control")
         self.geometry("1100x700")
 
-        # --- 1. BARRA LATERAL (Menú Fijo) ---
-        self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
-        self.sidebar.pack(side="left", fill="y")
+        # --- A. CONFIGURAR LA MALLA (GRID) DE LA VENTANA PRINCIPAL ---
+        self.grid_columnconfigure(1, weight=1) # El contenedor de ventas se estira
+        self.grid_rowconfigure(0, weight=1)    # El centro se estira hacia abajo
+        self.grid_rowconfigure(1, weight=0)    # La barra de estado se queda fija abajo
 
+        # --- B. CREAR LOS COMPONENTES (Sin posicionarlos aún) ---
+        
+        # Barra de Estado (Abajo)
+        self.status_frame = ctk.CTkFrame(self, height=30, fg_color="#2b2b2b", corner_radius=0)
+        
+        self.btn_user_status = ctk.CTkButton(
+            self.status_frame, text="👤 Sesión: No iniciada", 
+            font=("Arial", 12), fg_color="transparent", 
+            hover_color="#3d3d3d", command=self.cerrar_sesion
+        )
+        self.btn_user_status.pack(side="left", padx=20)
+        
+        import datetime
+        fecha = datetime.datetime.now().strftime("%d/%m/%Y")
+        self.lbl_fecha = ctk.CTkLabel(self.status_frame, text=f"📅 {fecha}", font=("Arial", 12))
+        self.lbl_fecha.pack(side="right", padx=20)
+
+        # Barra Lateral (Izquierda)
+        self.sidebar = ctk.CTkFrame(self, width=200, corner_radius=0)
         self.lbl_logo = ctk.CTkLabel(self.sidebar, text="MyMPos", font=("Roboto", 24, "bold"))
         self.lbl_logo.pack(pady=30)
 
-        self.btn_pos = ctk.CTkButton(self.sidebar, text="VENTAS", command=self.mostrar_ventas)
+        self.btn_pos = ctk.CTkButton(self.sidebar, text="🛒 VENTAS", command=self.mostrar_ventas)
         self.btn_pos.pack(pady=10, padx=20)
 
-        self.btn_inv = ctk.CTkButton(self.sidebar, text="INVENTARIO", command=self.mostrar_inventario)
+        self.btn_consulta = ctk.CTkButton(self.sidebar, text="🔍 CONSULTAR PRECIO", command=self.abrir_consulta_precios)
+        self.btn_consulta.pack(pady=10, padx=20)
+
+        self.btn_inv = ctk.CTkButton(self.sidebar, text="📦 INVENTARIO", command=self.mostrar_inventario)
         self.btn_inv.pack(pady=10, padx=20)
 
-        self.btn_reportes = ctk.CTkButton(self.sidebar, text="Reportes / Caja", command=self.mostrar_seccion_reportes)
+        self.btn_reportes = ctk.CTkButton(self.sidebar, text="📈 Reportes / Caja", command=self.mostrar_seccion_reportes)
         self.btn_reportes.pack(pady=10, padx=20)
 
-        # --- 2. CONTENEDOR PRINCIPAL (Donde cambia el contenido) ---
+        # Contenedor Principal (Derecha)
         self.contenedor = ctk.CTkFrame(self, corner_radius=15)
-        self.contenedor.pack(side="right", fill="both", expand=True, padx=20, pady=20)
+
+        # --- C. POSICIONAR TODO CON GRID (Regla de oro: No usar .pack aquí) ---
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        self.contenedor.grid(row=0, column=1, sticky="nsew", padx=20, pady=20)
+        self.status_frame.grid(row=1, column=0, columnspan=2, sticky="ew")
 
         # usuario y cliente actuales
         self.current_user = None
@@ -52,19 +77,141 @@ class MyMPos(ctk.CTk):
         # Mostrar Ventas por defecto
         self.mostrar_ventas()
 
+    def aplicar_estilo_oscuro(self):
+        style = ttk.Style()
+        style.theme_use("clam") # Forzamos el motor que sí acepta colores
+        
+        # Configuramos el estilo 'Treeview' de forma global
+        style.configure("Treeview",
+            background="#2b2b2b",
+            foreground="white",
+            fieldbackground="#2b2b2b",
+            rowheight=35,
+            borderwidth=0,
+            font=("Arial", 11)
+        )
+        style.configure("Treeview.Heading",
+            background="#333333",
+            foreground="white",
+            relief="flat",
+            font=("Arial", 12, "bold")
+        )
+        style.map("Treeview", background=[('selected', '#1f538d')])
+
     def _prompt_login(self):
+        # 1. Nos aseguramos de que la principal esté escondida
+        self.withdraw() 
+        
+        # 2. Lanzamos el diálogo
         dlg = LoginDialog(self, self.db)
+        
+        # 3. Esperamos a que el usuario termine en esa ventana
         self.wait_window(dlg)
+        
         if getattr(dlg, 'result', None):
-            self.current_user = dlg.result
-            name = self.current_user[2] if len(self.current_user) > 2 else self.current_user[1]
-            self.lbl_logo.configure(text=f"MyMPos - {name}")
+            self.current_user = dlg.result 
             
-            # SOLO SI EL LOGIN ES EXITOSO, mostramos las ventas
+            # --- LÍNEA CLAVE 1: Mostrar la ventana principal ---
+            self.deiconify() 
+            
+            nombre_real = self.current_user[2] 
+            rol_db = self.current_user[3].lower() if self.current_user[3] else "cajero"
+            
+            self.btn_user_status.configure(
+                text=f"👤 USUARIO: {nombre_real} | ROL: {rol_db.upper()} (Cerrar Sesión)"
+            )
+            
+            self.lbl_logo.configure(text=f"MyMPos\n{nombre_real}")
+
+            # Bloque de seguridad según el rol
+            if rol_db == "admin":
+                # Verificamos si ya existe el botón para no crear 20 botones iguales
+                if not hasattr(self, 'btn_usuarios') or self.btn_usuarios is None:
+                    self.btn_usuarios = ctk.CTkButton(self.sidebar, text="+ NUEVO EMPLEADO", 
+                                                     fg_color="#1e3799", 
+                                                     command=self.abrir_ventana_nuevo_empleado)
+                
+                # Mostramos todo en orden
+                self.btn_pos.pack(pady=10, padx=20)
+                self.btn_inv.pack(pady=10, padx=20)
+                self.btn_reportes.pack(pady=10, padx=20)
+                self.btn_usuarios.pack(pady=10, padx=20)
+            else:
+                # Si es cajero, ocultamos lo prohibido
+                self.btn_inv.pack_forget()
+                self.btn_reportes.pack_forget()
+                if hasattr(self, 'btn_usuarios'):
+                    self.btn_usuarios.pack_forget()
+
             self.mostrar_ventas() 
         else:
+            # Si cierran la ventanita de login sin entrar, se cierra el programa
             self.quit()
-            self.destroy()
+
+    def abrir_ventana_nuevo_empleado(self):
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("Registrar Nuevo Empleado")
+        ventana.geometry("400x550")
+        
+        # Estas dos líneas evitan que la ventana se "pierda" o se minimice sola
+        ventana.after(100, ventana.lift) 
+        ventana.grab_set() 
+
+        ctk.CTkLabel(ventana, text="REGISTRO DE PERSONAL", font=("Roboto", 20, "bold")).pack(pady=20)
+
+        ent_nombre = ctk.CTkEntry(ventana, placeholder_text="Nombre Completo", width=300)
+        ent_nombre.pack(pady=10)
+
+        ent_user = ctk.CTkEntry(ventana, placeholder_text="Nombre de Usuario (Login)", width=300)
+        ent_user.pack(pady=10)
+
+        ent_pass = ctk.CTkEntry(ventana, placeholder_text="Contraseña Normal", width=300, show="*")
+        ent_pass.pack(pady=10)
+
+        combo_rol = ctk.CTkComboBox(ventana, values=["cajero", "admin"], width=300)
+        combo_rol.set("cajero")
+        combo_rol.pack(pady=10)
+
+        def guardar():
+            nombre = ent_nombre.get().strip()
+            usuario = ent_user.get().strip()
+            contra = ent_pass.get().strip()
+            rol = combo_rol.get()
+
+            if not (nombre and usuario and contra):
+                from tkinter import messagebox
+                messagebox.showwarning("Faltan datos", "Por favor llena todos los campos.")
+                return
+
+            import hashlib
+            hash_v = hashlib.sha256(contra.encode('utf-8')).hexdigest()
+            
+            exito = self.db.registrar_nuevo_usuario(usuario, nombre, hash_v, rol)
+            
+            if exito:
+                from tkinter import messagebox
+                messagebox.showinfo("Listo", f"El usuario {usuario} ha sido creado.")
+                ventana.destroy()
+            else:
+                from tkinter import messagebox
+                messagebox.showerror("Error", "No se pudo crear. Revisa si el nombre ya existe.")
+
+        # --- ESTO ES LO QUE FALTABA: EL BOTÓN ---
+        btn_crear = ctk.CTkButton(ventana, text="CREAR EMPLEADO", fg_color="#27ae60", command=guardar)
+        btn_crear.pack(pady=20)
+
+    def cerrar_sesion(self):
+        from tkinter import messagebox
+        if messagebox.askyesno("Cerrar Sesión", "¿Estás seguro de que deseas salir?"):
+            # 1. Limpiamos los datos del usuario actual
+            self.current_user = None
+            
+            # 2. Reseteamos la interfaz
+            self.btn_user_status.configure(text="👤 Sesión: No iniciada")
+            self.lbl_logo.configure(text="MyMPos")
+        
+            # 5. Volvemos a lanzar el login
+            self._prompt_login()
 
     def limpiar_pantalla(self):
         for widget in self.contenedor.winfo_children():
@@ -72,38 +219,24 @@ class MyMPos(ctk.CTk):
 
     def mostrar_ventas(self):
         self.limpiar_pantalla()
-        self.carrito = {} # Reiniciar carrito al entrar a la vista
+        self.carrito = {} 
+        self.aplicar_estilo_oscuro()
 
-        # --- ESTILO TIPO CLIENTE (OSCURO) ---
-        style = ttk.Style()
-        style.theme_use("clam") 
-        style.configure("Treeview",
-            background="#2b2b2b",
-            foreground="white",
-            fieldbackground="#2b2b2b",
-            rowheight=35, # Un poco más alta para que se vea pro
-            borderwidth=0,
-            font=("Roboto", 11)
-        )
-        style.configure("Treeview.Heading", background="#333333", foreground="white", relief="flat")
-        style.map("Treeview", background=[('selected', '#e74c3c')]) # Rojo al seleccionar para borrar
+        # Configurar el contenedor para que la tabla se estire
+        self.contenedor.grid_columnconfigure(0, weight=1)
+        self.contenedor.grid_rowconfigure(1, weight=1) # La tabla (fila 1) es la que crece
 
-        self.scroll_container = ctk.CTkScrollableFrame(self.contenedor, fg_color="transparent")
-        self.scroll_container.pack(fill="both", expand=True)
+        # --- BLOQUE SUPERIOR (Buscador) ---
+        self.frame_sup = ctk.CTkFrame(self.contenedor, fg_color="transparent")
+        self.frame_sup.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
         
-        # Ahora usaremos self.scroll_container en lugar de self.contenedor para los elementos
+        ctk.CTkLabel(self.frame_sup, text=f"📊 Tasa BCV: {self.tasa:.2f} Bs.", 
+                     font=("Roboto", 12, "bold"), text_color="#3498db").pack(anchor="w")
         
-        # Cabecera Tasa
-        ctk.CTkLabel(
-            self.scroll_container, 
-            text=f"📊 Tasa BCV: {self.tasa:.2f} Bs.", 
-            font=("Roboto", 12, "bold"),
-            text_color="#3498db" # Azul suave en lugar de amarillo para que no canse la vista
-        ).pack(anchor="w", padx=25, pady=(10, 0)) # "w" es West (Izquierda)
         # --- BUSCADOR VELOZ ---
-        ctk.CTkLabel(self.scroll_container, text="Buscar Producto:").pack(pady=(10,0))
+        ctk.CTkLabel(self.frame_sup, text="Buscar Producto:").pack(pady=(10,0))
         
-        self.entry_buscar = ctk.CTkEntry(self.scroll_container, width=500, height=40)
+        self.entry_buscar = ctk.CTkEntry(self.frame_sup, width=500, height=40)
         self.entry_buscar.pack(pady=(5,0))
         
         # La lista FLOTANTE (se queda en el contenedor principal para que no se mueva con el scroll)
@@ -116,6 +249,10 @@ class MyMPos(ctk.CTk):
         self.entry_buscar.bind("<KeyRelease>", self._filtrar_busqueda_combo)
         self.lista_sugerencias.bind("<<ListboxSelect>>", self.agregar_al_carrito)
 
+        # --- BLOQUE CENTRAL (Scroll con Tabla y Pagos) ---
+        self.scroll_container = ctk.CTkScrollableFrame(self.contenedor, fg_color="transparent")
+        self.scroll_container.grid(row=1, column=0, sticky="nsew", padx=5)
+
         # Panel de pago visual
         pago_frame = ctk.CTkFrame(self.scroll_container, fg_color="transparent")
         pago_frame.pack(fill='x', padx=20, pady=(0,8))
@@ -123,19 +260,33 @@ class MyMPos(ctk.CTk):
         pago_center = ctk.CTkFrame(pago_frame, fg_color="transparent")
         pago_center.pack(anchor='center', pady=4)
 
-        payment_box = ctk.CTkFrame(pago_center, corner_radius=12, fg_color="#1f1f1f")
-        payment_box.pack(padx=10, pady=6)
+        payment_box = ctk.CTkFrame(pago_center, corner_radius=15, fg_color="#1f1f1f")
+        payment_box.pack(padx=10, pady=10, fill="x") # Aumentamos pady a 10
 
-        ctk.CTkLabel(payment_box, text="Método de pago:", font=("Arial", 12, "bold")).pack(side='left', padx=(12,8))
+        # Label "Método de pago" con un poco más de espacio
+        ctk.CTkLabel(payment_box, text="Método de pago:", font=("Arial", 13, "bold")).pack(side='left', padx=(20,10), pady=15)
 
         pagos_frame = ctk.CTkFrame(payment_box, fg_color="transparent")
-        pagos_frame.pack(side='left', padx=6)
+        pagos_frame.pack(side='left', padx=10, fill="x", expand=True)
 
         self.payment_buttons = {}
+        # He ajustado el tamaño de los botones para que sean más uniformes
         pagos = [("Efectivo","efectivo"), ("Tarjeta","tarjeta"), ("Biopago","biopago"), ("Transferencia","transferencia"), ("Pago Móvil","pago movil")]
+        
         for text, key in pagos:
-            btn = ctk.CTkButton(pagos_frame, text=text, width=110, height=36, fg_color="#2b2b2b", corner_radius=8, command=lambda k=key: self._set_metodo_pago(k))
-            btn.pack(side='left', padx=6)
+            # Si el botón es Efectivo, le asignamos la función del menú
+            comando = self._mostrar_menu_efectivo if key == "efectivo" else lambda k=key: self._set_metodo_pago(k)
+            
+            btn = ctk.CTkButton(
+                pagos_frame, 
+                text=text, 
+                width=120, 
+                height=40,
+                fg_color="#2b2b2b", 
+                corner_radius=10, 
+                command=comando
+            )
+            btn.pack(side='left', padx=8, pady=10)
             self.payment_buttons[key] = btn
 
         # Área de referencia
@@ -153,21 +304,10 @@ class MyMPos(ctk.CTk):
         self.btn_cliente = ctk.CTkButton(cliente_inner, text="Cliente: Consumidor Final", width=300, height=36, fg_color="#1976d2", command=self._seleccionar_cliente)
         self.btn_cliente.pack(side='left')
 
-        # --- CONFIGURACIÓN DE ESTILO PARA EL CARRITO ---
-        style = ttk.Style()
-        style.theme_use("default")
-        style.configure("Treeview",
-            background="#2b2b2b",
-            foreground="white",
-            rowheight=30,
-            fieldbackground="#2b2b2b",
-            borderwidth=0
-        )
-        style.map("Treeview", background=[('selected', '#1f538d')])
-
        # 2. TABLA CON COLUMNA "ACCIÓN"
         self.columnas_cart = ("cant", "producto", "precio", "subtotal", "accion")
-        self.tabla_cart = ttk.Treeview(self.scroll_container, columns=self.columnas_cart, show="headings", height=10)
+        self.tabla_cart = ttk.Treeview(self.scroll_container, columns=self.columnas_cart, 
+                                      show="headings", style="Custom.Treeview")
         
         # Encabezados
         self.tabla_cart.heading("cant", text="CANT")
@@ -186,12 +326,18 @@ class MyMPos(ctk.CTk):
         # EVENTO: Doble clic para ejecutar la eliminación
         self.tabla_cart.bind("<Double-1>", lambda event: self.eliminar_item_carrito())
 
-        # Total
-        self.lbl_total = ctk.CTkLabel(self.scroll_container, text="TOTAL: 0.00$", font=("Arial", 40, "bold"))
-        self.lbl_total.pack(pady=10)
+        # --- BLOQUE INFERIOR (Total y Cobrar fijo) ---
+        self.frame_total = ctk.CTkFrame(self.contenedor, fg_color="#1a1a1a", height=100)
+        self.frame_total.grid(row=2, column=0, sticky="ew")
+        
+        self.lbl_total = ctk.CTkLabel(self.frame_total, text="TOTAL: $0.00\n(0.00 Bs.)", 
+                                     font=("Arial", 30, "bold"), text_color="#27ae60")
+        self.lbl_total.pack(side="left", padx=30, pady=10)
 
-        self.btn_cobrar = ctk.CTkButton(self.scroll_container, text="COBRAR VENTA", fg_color="green", height=45, command=self.finalizar_venta)
-        self.btn_cobrar.pack(pady=10)
+        self.btn_cobrar = ctk.CTkButton(self.frame_total, text="COBRAR VENTA", fg_color="green",
+                                       height=50, width=200, font=("Arial", 14, "bold"),
+                                       command=self.finalizar_venta)
+        self.btn_cobrar.pack(side="right", padx=30, pady=10)
 
         # --- BOTÓN DE CIERRE LIMPIO ---
         self.btn_cierre_esquina = ctk.CTkButton(
@@ -218,6 +364,67 @@ class MyMPos(ctk.CTk):
         # Forzar a la ventana a dibujar los widgets internos inmediatamente
         self.update_idletasks()
         self.after(100, lambda: self.scroll_container._parent_canvas.event_generate("<Configure>"))
+
+    def abrir_consulta_precios(self):
+        # Crear ventana emergente
+        ventana = ctk.CTkToplevel(self)
+        ventana.title("🔍 Verificador de Precios")
+        ventana.geometry("500x400")
+        ventana.after(100, ventana.lift) # Traer al frente
+        ventana.grab_set() # Bloquear la ventana de atrás mientras esta esté abierta
+
+        ctk.CTkLabel(ventana, text="Consulta de Producto", font=("Arial", 20, "bold")).pack(pady=15)
+
+        # Campo de entrada
+        ent_busqueda = ctk.CTkEntry(ventana, placeholder_text="Escriba nombre o pase el escáner...", width=350)
+        ent_busqueda.pack(pady=5)
+        ent_busqueda.focus() # El cursor aparece aquí automáticamente
+
+        # Contenedor de resultados
+        scroll_res = ctk.CTkScrollableFrame(ventana, width=450, height=220)
+        scroll_res.pack(pady=10, padx=10)
+
+        def ejecutar_busqueda(event=None):
+            # Limpiar búsqueda anterior
+            for widget in scroll_res.winfo_children():
+                widget.destroy()
+
+            texto = ent_busqueda.get()
+            if not texto: return
+
+            resultados = self.db.consultar_producto_rapido(texto)
+
+            if not resultados:
+                ctk.CTkLabel(scroll_res, text="❌ No se encontró el producto").pack(pady=20)
+                return
+
+            # Mostrar cada producto encontrado
+            for nombre, precio, stock in resultados:
+                fila = ctk.CTkFrame(scroll_res)
+                fila.pack(fill="x", pady=2)
+                
+                # Nombre
+                ctk.CTkLabel(fila, text=nombre.upper(), font=("Arial", 12, "bold"), width=200, anchor="w").pack(side="left", padx=10)
+                precio_usd = precio # El valor que viene de la DB
+                precio_bs = precio_usd * self.tasa # Conversión
+
+                # Mostramos ambos precios con formato profesional
+                ctk.CTkLabel(
+                    fila, 
+                    text=f"${precio_usd:,.2f} USD\n{precio_bs:,.2f} Bs", 
+                    font=("Arial", 13, "bold"), 
+                    text_color="#3498db",
+                    justify="left"
+                ).pack(side="left", padx=15)
+                # Stock (Cambia de color si hay poco)
+                color_stock = "red" if stock <= 3 else "gray"
+                ctk.CTkLabel(fila, text=f"Stock: {stock}", text_color=color_stock).pack(side="right", padx=10)
+
+        # Hacer que busque al presionar ENTER
+        ent_busqueda.bind("<Return>", ejecutar_busqueda)
+        
+        # Botón opcional de buscar
+        ctk.CTkButton(ventana, text="BUSCAR", command=ejecutar_busqueda).pack(pady=5)
     
     def _forzar_refresco_visual(self):
         """Esta función despierta al ScrollableFrame para que no salga en blanco"""
@@ -653,14 +860,20 @@ class MyMPos(ctk.CTk):
             self.entry_buscar.focus()
 
     def actualizar_total_interfaz(self):
-        """Calcula el total y actualiza el label en pantalla"""
-        total = 0.0
+        """Calcula el total en USD y Bs, y actualiza el label en pantalla"""
+        total_usd = 0.0
         for info in self.carrito.values():
-            total += float(info['subtotal'])
+            total_usd += float(info['subtotal'])
+        
+        # Calculamos la conversión a Bolívares
+        total_bs = total_usd * self.tasa
         
         if hasattr(self, 'lbl_total'):
-            self.lbl_total.configure(text=f"TOTAL: ${total:,.2f}")
-        return total
+            # Usamos \n para que se vea uno sobre otro, o un guion si lo prefieres de lado
+            texto_pantalla = f"TOTAL: ${total_usd:,.2f}\n({total_bs:,.2f} Bs.)"
+            self.lbl_total.configure(text=texto_pantalla)
+        
+        return total_usd
 
     def _refrescar_vista_carrito(self):
         # Limpiar la tabla antes de rellenar
@@ -674,7 +887,7 @@ class MyMPos(ctk.CTk):
                 info['nombre'], 
                 f"{info['precio']:.2f}", 
                 f"{info['subtotal']:.2f}",
-                "❌ QUITAR" # Texto que sale al lado de cada producto
+                "🗑️ ELIMINAR" # Texto que sale al lado de cada producto
             ))
         
         # Forzamos que la tabla se redibuje (esto evita el fondo blanco)
@@ -684,11 +897,11 @@ class MyMPos(ctk.CTk):
         dlg = ClienteDialog(self, self.db)
         self.wait_window(dlg)
         
-        if hasattr(dlg, 'result') and dlg.result:
+        if dlg.result: # 'result' es lo que definiste en el diálogo
             self.current_client = dlg.result
-            # Esto actualiza el botón azul de la interfaz de ventas
-            # Usamos el índice [1] porque suele ser el nombre en la tupla (id, nombre, ...)
             self.btn_cliente.configure(text=f"Cliente: {self.current_client[1]}", fg_color="#2ecc71")
+            # IMPORTANTE: Refrescar la tabla del carrito después de elegir cliente
+            self._refrescar_vista_carrito()
         else:
             self.current_client = None
             self.btn_cliente.configure(text="Cliente: Consumidor Final", fg_color="#1976d2")
@@ -697,6 +910,23 @@ class MyMPos(ctk.CTk):
     def _on_metodo_pago_change(self, value):
         # antiguo handler (ya no usado) — mantener compatibilidad
         self._set_metodo_pago(value)
+
+    def _mostrar_menu_efectivo(self):
+        """Crea un menú flotante para elegir el tipo de moneda en efectivo"""
+        # Creamos el menú con un estilo oscuro básico
+        menu_moneda = tk.Menu(self, tearoff=0, background='#1f1f1f', foreground='white', activebackground='#3498db', font=("Arial", 11))
+        
+        # Opciones
+        menu_moneda.add_command(label="💵 Efectivo en Dólares ($)", command=lambda: self._set_metodo_pago("efectivo_usd"))
+        menu_moneda.add_separator()
+        menu_moneda.add_command(label="🇻🇪 Efectivo en Bolívares (Bs)", command=lambda: self._set_metodo_pago("efectivo_bs"))
+        
+        # Calculamos la posición del botón de efectivo para mostrar el menú justo ahí
+        btn = self.payment_buttons["efectivo"]
+        x = btn.winfo_rootx()
+        y = btn.winfo_rooty() + btn.winfo_height()
+        
+        menu_moneda.tk_popup(x, y)
 
     def _set_metodo_pago(self, metodo):
         self.metodo_seleccionado = metodo
@@ -726,94 +956,138 @@ class MyMPos(ctk.CTk):
             else:
                 btn.configure(fg_color="#2b2b2b", text_color="#d1d1d1")
 
-    def finalizar_venta(self):
-        # 1. ¿Hay cajero?
-        if not hasattr(self, 'current_user') or self.current_user is None:
-            messagebox.showerror("Error", "Inicie sesión.")
-            return
-
-        # 2. ¿Hay productos?
-        if not self.tabla_cart.get_children():
-            messagebox.showwarning("Error", "Carrito vacío.")
-            return
-
-        # 3. ¿Seleccionó un cliente real?
-        if "Consumidor Final" in self.btn_cliente.cget("text"):
-            messagebox.showwarning("Cliente", "Seleccione un cliente de la lista.")
-            return
-        """Procesa la venta, guarda en DB y abre la factura PDF automáticamente"""
-        # 1. Verificación: ¿Hay algo que vender?
-        if not self.carrito:
-            messagebox.showwarning("Atención", "El carrito está vacío.")
-            return
-
-        if not messagebox.askyesno("Confirmar Venta", "¿Desea procesar el pago y finalizar?"):
-            return
-
+    def confirmar_registro_completo(self, ventana_emergente, datos):
+        """Procesa el guardado final en la base de datos con el desglose multimoneda"""
         try:
-            # 2. Recolección de IDs de seguridad
-            # IMPORTANTE: Asegúrate de que self.current_user[0] sea el ID que está en la tabla public.usuarios
-            if hasattr(self, 'current_user') and self.current_user:
-                u_id = str(self.current_user[0]) # Usa el ID del que inició sesión (Luis, María, etc.)
-            else:
-                u_id = "1"
-            
-            # Si no hay usuario logueado, intentamos usar un ID por defecto pero que sea UUID o texto válido
-            if u_id is None:
-                # Si tu tabla usa UUID, esto debería ser un UUID válido, si usa Integer, un número.
-                # Por ahora, lo dejamos como None para que el reporte muestre "Sistema" si no hay nadie.
-                pass
-
+            # Extraer IDs de seguridad
+            u_id = str(self.current_user[0]) if self.current_user else "1"
             c_id = self.current_client[0] if self.current_client else None
             
-            # Referencia (Pago móvil / Transferencia)
-            ref = ""
-            if hasattr(self, 'entry_referencia'):
-                ref = self.entry_referencia.get().strip()
-
-            # 3. GUARDADO EN BASE DE DATOS
-            # Pasamos u_id como usuario_id para que se guarde en vendedor_id
+            # 1. GUARDAR EN BASE DE DATOS
+            # Enviamos el desglose detallado
             venta_id = self.db.crear_venta(
                 carrito=self.carrito,
                 usuario_id=u_id,
                 cliente_id=c_id,
-                metodo_pago=self.metodo_seleccionado,
-                referencia=ref
+                metodo_pago="Mixto", 
+                referencia=datos['ref'],
+                # Desglose para el cierre de caja
+                pago_usd=float(datos['usd'] or 0),
+                pago_bs_efec=float(datos['bs_e'] or 0),
+                pago_bs_digital=float(datos['bs_d'] or 0)
             )
 
             if venta_id:
-                # 4. DISPARAR EL RECIBO
-                try:
-                    # Llamamos a generar_recibo_pdf pasándole el ID recién creado
-                    self.generar_recibo_pdf(venta_id)
-                except Exception as e:
-                    print(f"Error abriendo PDF: {e}")
-                    messagebox.showwarning("Aviso", "Venta guardada, pero no se pudo abrir el PDF.")
+                # 2. GENERAR PDF
+                self.generar_recibo_pdf(venta_id)
 
-                # 5. LIMPIEZA Y ACTUALIZACIÓN
+                # 3. LIMPIEZA TOTAL
                 self.carrito = {}
                 self.current_client = None
-                
-                # Limpiar campo de texto si existe
                 if hasattr(self, 'entry_referencia'):
                     self.entry_referencia.delete(0, 'end')
                 
-                # Refrescar toda la interfaz para que aparezca la nueva venta
                 self._refrescar_vista_carrito()
+                ventana_emergente.destroy()
                 
-                # Si tienes la sección de reportes abierta, la actualizamos
-                if hasattr(self, 'mostrar_seccion_reportes'):
-                    # Si self.ent_fecha existe, usamos su fecha, sino la de hoy
-                    fecha = self.ent_fecha.get() if hasattr(self, 'ent_fecha') else None
-                    self.mostrar_seccion_reportes(fecha)
-                
-                messagebox.showinfo("Éxito", f"Venta #{venta_id} completada.")
+                messagebox.showinfo("Éxito", f"Venta #{venta_id} registrada.\nDesglose guardado correctamente.")
             else:
-                messagebox.showerror("Error", "No se pudo guardar la venta en la base de datos.")
+                messagebox.showerror("Error", "La base de datos rechazó la venta.")
 
         except Exception as e:
-            print(f"Error Crítico en finalizar_venta: {e}")
-            messagebox.showerror("Error Crítico", f"Ocurrió un error en el proceso: {e}")
+            messagebox.showerror("Error Crítico", f"Fallo al registrar: {e}")
+
+    def finalizar_venta(self):
+        """Abre ventana de cobro multimoneda con registro detallado"""
+        # --- 1. VALIDACIONES DE SEGURIDAD ---
+        if not hasattr(self, 'current_user') or self.current_user is None:
+            messagebox.showerror("Error", "Inicie sesión.")
+            return
+
+        if not self.carrito:
+            messagebox.showwarning("Atención", "El carrito está vacío.")
+            return
+
+        total_usd = sum(float(info['subtotal']) for info in self.carrito.values())
+        total_bs = total_usd * self.tasa
+
+        vent_pago = ctk.CTkToplevel(self)
+        vent_pago.title("Caja: Pago Móvil / Transferencia / Efectivo")
+        vent_pago.geometry("550x600")
+        vent_pago.grab_set()
+
+        # Variables
+        var_usd = tk.StringVar(value="0")
+        var_bs_efec = tk.StringVar(value="0")
+        var_bs_dig = tk.StringVar(value="0")
+        var_ref = tk.StringVar(value=self.entry_referencia.get().strip())
+
+        # Auto-relleno inteligente basado en lo que Luis marcó en la principal
+        if self.metodo_seleccionado in ["pago movil", "transferencia", "tarjeta"]:
+            var_bs_dig.set(f"{total_bs:.2f}")
+        elif self.metodo_seleccionado == "efectivo":
+            var_usd.set(f"{total_usd:.2f}")
+
+        # --- Interfaz de la ventana ---
+        ctk.CTkLabel(vent_pago, text="RESUMEN MULTIMONEDA", font=("Arial", 18, "bold")).pack(pady=10)
+        
+        f_montos = ctk.CTkFrame(vent_pago, fg_color="transparent")
+        f_montos.pack(fill="x", padx=40)
+
+        # Filas de entrada
+        def fila(txt, var, r):
+            ctk.CTkLabel(f_montos, text=txt).grid(row=r, column=0, sticky="w", pady=10)
+            ctk.CTkEntry(f_montos, textvariable=var, width=150).grid(row=r, column=1, padx=10)
+
+        fila("Efectivo $:", var_usd, 0)
+        fila("Efectivo Bs:", var_bs_efec, 1)
+        fila("Digital (PM/Transf):", var_bs_dig, 2)
+
+        # Referencia obligatoria para Digital
+        ctk.CTkLabel(vent_pago, text="NÚMERO DE REFERENCIA (Obligatorio para PM/Transf):", font=("Arial", 12, "bold")).pack(pady=(15,0))
+        ent_ref = ctk.CTkEntry(vent_pago, textvariable=var_ref, placeholder_text="Ej: 4589...", width=300)
+        ent_ref.pack(pady=5)
+
+        lbl_info = ctk.CTkLabel(vent_pago, text="", font=("Arial", 13))
+        lbl_info.pack(pady=10)
+
+        def validar(*args):
+            try:
+                p_usd = float(var_usd.get() or 0)
+                p_bs_d = float(var_bs_dig.get() or 0)
+                p_bs_e = float(var_bs_efec.get() or 0)
+                total_p = p_usd + (p_bs_d / self.tasa) + (p_bs_e / self.tasa)
+                
+                referencia = var_ref.get().strip()
+                falta = total_usd - total_p
+
+                # Lógica estricta de referencia
+                if p_bs_d > 0 and len(referencia) < 4:
+                    lbl_info.configure(text="⚠️ INGRESE REFERENCIA BANCARIA", text_color="#f39c12")
+                    btn_reg.configure(state="disabled")
+                    ent_ref.configure(border_color="#f39c12")
+                elif falta > 0.01:
+                    lbl_info.configure(text=f"⚠️ FALTAN: ${falta:,.2f}", text_color="#e74c3c")
+                    btn_reg.configure(state="disabled")
+                else:
+                    lbl_info.configure(text="✅ MONTO COMPLETO", text_color="#2ecc71")
+                    btn_reg.configure(state="normal")
+                    ent_ref.configure(border_color="gray")
+            except: pass
+
+        # Escuchar cambios en todo
+        for v in [var_usd, var_bs_dig, var_bs_efec, var_ref]:
+            v.trace_add("write", validar)
+
+        btn_reg = ctk.CTkButton(vent_pago, text="REGISTRAR VENTA", height=50, fg_color="#27ae60",
+                                state="disabled", font=("Arial", 16, "bold"),
+                                command=lambda: self.confirmar_registro_completo(vent_pago, {
+                                    "usd": var_usd.get(), "bs_e": var_bs_efec.get(), 
+                                    "bs_d": var_bs_dig.get(), "ref": var_ref.get()
+                                }))
+        btn_reg.pack(pady=20, padx=40, fill="x")
+        
+        validar()
 
     def limpiar_formulario_inv(self):
         self.in_cod.delete(0, 'end')
@@ -1059,6 +1333,7 @@ class LoginDialog(ctk.CTkToplevel):
         self.geometry("360x200")
         self.transient(parent)
         self.grab_set()
+        self.configure(fg_color="#1a1a1a")
 
         ctk.CTkLabel(self, text="Usuario:").pack(pady=(12,4))
         self.e_user = ctk.CTkEntry(self, width=300)
@@ -1088,113 +1363,109 @@ class LoginDialog(ctk.CTkToplevel):
         else:
             messagebox.showerror("Error", "Usuario o contraseña incorrectos")
 
+    def ejecutar_login(self):
+        dlg = LoginDialog(self, self.db)
+        self.wait_window(dlg)
+        
+        if dlg.result:
+            self.usuario_actual = dlg.result # (id, nombre, user, rol)
+            self.deiconify()
+            
+            # Actualizamos la barra de estado con el nombre real
+            self.lbl_user_status.configure(
+                text=f"👤 CAJERO: {self.usuario_actual[1]} | ROL: {self.usuario_actual[3].upper()}",
+                text_color="#2ecc71" # Verde para indicar sesión activa
+            )
+        else:
+            self.quit()
 
 class ClienteDialog(ctk.CTkToplevel):
     def __init__(self, parent, db):
         super().__init__(parent)
         self.title("Gestión de Clientes")
-        self.geometry("700x500")
+        self.geometry("800x600") # Un poco más grande para que respire
+        self.minsize(600, 450)   # Evita que se encoja tanto que desaparezcan los botones
         self.db = db
-        self.result = None # Aquí se guardará el cliente seleccionado
+        self.result = None 
         
-        # Hacer que la ventana sea modal
-        self.transient(parent)
-        self.grab_set()
-        self.focus_set()
+        # 1. TÍTULO (Fijo arriba)
+        self.lbl_titulo = ctk.CTkLabel(self, text="Seleccionar Cliente", font=("Arial", 22, "bold"))
+        self.lbl_titulo.pack(pady=(15, 5), fill="x")
 
-        # --- TÍTULO ---
-        self.lbl_titulo = ctk.CTkLabel(self, text="Seleccionar Cliente", font=("Arial", 20, "bold"))
-        self.lbl_titulo.pack(pady=10)
-
-        # --- BUSCADOR ---
-        frame_busqueda = ctk.CTkFrame(self)
-        frame_busqueda.pack(fill="x", padx=20, pady=10)
+        # 2. BUSCADOR (Se ajusta al ancho, pero no crece hacia abajo)
+        self.frame_busqueda = ctk.CTkFrame(self, fg_color="#2b2b2b")
+        self.frame_busqueda.pack(fill="x", padx=20, pady=10)
 
         self.entry_buscar = ctk.CTkEntry(
-            frame_busqueda, 
+            self.frame_busqueda, 
             placeholder_text="Escriba nombre, cédula o ID para filtrar...",
-            width=450
+            height=40
         )
-        self.entry_buscar.pack(side="left", padx=10, pady=10, expand=True, fill="x")
-        
-        # Evento: busca cada vez que se suelta una tecla
+        self.entry_buscar.pack(side="left", padx=15, pady=10, expand=True, fill="x")
         self.entry_buscar.bind("<KeyRelease>", lambda e: self._buscar())
 
-        # --- TABLA (TREEVIEW) ---
-        frame_tabla = ctk.CTkFrame(self)
-        frame_tabla.pack(fill="both", expand=True, padx=20, pady=5)
+        # --- ESTILO ---
+        parent.aplicar_estilo_oscuro()
 
-        # Configurar estilo para que la tabla sea oscura y combine
-        style = ttk.Style()
-        style.theme_use("default")
-        style.configure("Treeview",
-            background="#2b2b2b",
-            foreground="white",
-            rowheight=30,
-            fieldbackground="#2b2b2b",
-            borderwidth=0,
-            font=("Arial", 11)
-        )
-        style.configure("Treeview.Heading",
-            background="#333333",
-            foreground="white",
-            relief="flat",
-            font=("Arial", 12, "bold")
-        )
-        style.map("Treeview", background=[('selected', '#1f538d')])
+        # 3. CONTENEDOR DE TABLA (El "Acordeón": crece y se encoge)
+        import tkinter as tk
+        self.contenedor_tabla = tk.Frame(self, bg="#2b2b2b")
+        # expand=True es la clave para que la tabla use todo el espacio sobrante
+        self.contenedor_tabla.pack(fill="both", expand=True, padx=20, pady=5)
 
-        # Crear la tabla
-        self.tree = ttk.Treeview(frame_tabla, columns=("id", "nombre", "cedula", "telefono"), show="headings")
+        self.tree = ttk.Treeview(
+            self.contenedor_tabla, 
+            columns=("id", "nombre", "cedula", "telefono"), 
+            show="headings"
+        )
         
-        self.tree.heading("id", text="ID")
-        self.tree.heading("nombre", text="NOMBRE")
-        self.tree.heading("cedula", text="CÉDULA / RIF")
-        self.tree.heading("telefono", text="TELÉFONO")
+        # Definir encabezados
+        for col in ("id", "nombre", "cedula", "telefono"):
+            self.tree.heading(col, text=col.upper())
 
-        self.tree.column("id", width=50, anchor="center")
-        self.tree.column("nombre", width=250)
-        self.tree.column("cedula", width=120)
-        self.tree.column("telefono", width=120)
+        # Configurar pesos de columnas (para que se estiren proporcionalmente)
+        self.tree.column("id", width=60, minwidth=50, anchor="center")
+        self.tree.column("nombre", width=300, minwidth=200)
+        self.tree.column("cedula", width=150, minwidth=100)
+        self.tree.column("telefono", width=150, minwidth=100)
 
         self.tree.pack(side="left", fill="both", expand=True)
 
-        # Scrollbar para la tabla
-        scrollbar = ttk.Scrollbar(frame_tabla, orient="vertical", command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(self.contenedor_tabla, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
         scrollbar.pack(side="right", fill="y")
 
-        # --- BOTONES DE ACCIÓN ---
-        frame_botones = ctk.CTkFrame(self, fg_color="transparent")
-        frame_botones.pack(fill="x", padx=20, pady=15)
+        # 4. BOTONES (Anclados abajo, se reparten el ancho)
+        self.frame_botones = ctk.CTkFrame(self, fg_color="transparent")
+        self.frame_botones.pack(fill="x", side="bottom", padx=20, pady=20)
 
+        # Usamos expand=True en cada botón para que se repartan el espacio horizontal equitativamente
         self.btn_seleccionar = ctk.CTkButton(
-            frame_botones, 
-            text="✓ SELECCIONAR", 
-            fg_color="#2ecc71", 
-            hover_color="#27ae60",
-            font=("Arial", 13, "bold"),
-            command=self._confirmar_seleccion
+            self.frame_botones, text="✓ SELECCIONAR", fg_color="#2ecc71", 
+            hover_color="#27ae60", font=("Arial", 13, "bold"), command=self._confirmar_seleccion
         )
-        self.btn_seleccionar.pack(side="left", padx=5)
+        self.btn_seleccionar.pack(side="left", padx=10, expand=True, fill="x")
 
         self.btn_nuevo = ctk.CTkButton(
-            frame_botones, 
-            text="+ NUEVO CLIENTE", 
-            command=self._nuevo_cliente
+            self.frame_botones, text="+ NUEVO CLIENTE", command=self._nuevo_cliente
         )
-        self.btn_nuevo.pack(side="left", padx=5)
+        self.btn_nuevo.pack(side="left", padx=10, expand=True, fill="x")
 
         self.btn_cancelar = ctk.CTkButton(
-            frame_botones, 
-            text="CANCELAR", 
-            fg_color="#e74c3c", 
-            hover_color="#c0392b",
-            command=self.destroy
+            self.frame_botones, text="CANCELAR", fg_color="#e74c3c", 
+            hover_color="#c0392b", command=self.destroy
         )
-        self.btn_cancelar.pack(side="right", padx=5)
+        self.btn_cancelar.pack(side="left", padx=10, expand=True, fill="x")
+        self.tree.bind("<Double-1>", lambda e: self._confirmar_seleccion())
 
-        # AL FINAL DEL INIT: Cargar la lista completa de una vez
         self._buscar()
+
+    def _forzar_dibujo(self):
+        """Asegura que los botones se pinten al final"""
+        self.update()
+        self.btn_seleccionar.lift()
+        self.btn_nuevo.lift()
+        self.btn_cancelar.lift()
 
     def _buscar(self):
         """Obtiene el texto del buscador y actualiza la tabla"""
@@ -1235,6 +1506,7 @@ class ClienteDialog(ctk.CTkToplevel):
         
         if cliente_completo:
             self.result = cliente_completo
+            self.master.update_idletasks() # Avisa a la ventana principal que se prepare
             self.destroy()
 
     def _nuevo_cliente(self):

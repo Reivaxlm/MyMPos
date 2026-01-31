@@ -437,5 +437,42 @@ class Database:
         except Exception as e:
             print(f"Error calculando cierre: {e}")
             return []
-    
+        
+    def registrar_nuevo_usuario(self, username, nombre, password_hash, rol):
+        """Registra un empleado en la tabla usuarios. Retorna True si tiene éxito."""
+        try:
+            with self.get_cursor() as cur:
+                query = """
+                    INSERT INTO usuarios (username, nombre, password_hash, rol) 
+                    VALUES (%s, %s, %s, %s)
+                """
+                cur.execute(query, (username, nombre, password_hash, rol))
+                
+                # --- LA SOLUCIÓN AQUÍ ---
+                # Accedemos a la conexión directamente desde el cursor
+                cur.connection.commit() 
+                return True
+        except Exception as e:
+            print(f"Error al registrar usuario: {e}")
+            # Si algo falla, intentamos hacer rollback desde el cursor si es posible
+            try:
+                cur.connection.rollback()
+            except:
+                pass
+            return False
+    def consultar_producto_rapido(self, busqueda):
+        """Retorna productos que coincidan con el nombre o código."""
+        query = """
+            SELECT nombre, precio_venta, stock 
+            FROM productos 
+            WHERE nombre ILIKE %s OR codigo_barras = %s
+        """
+        try:
+            with self.get_cursor() as cur:
+                # El %s con % al rededor permite buscar coincidencias parciales
+                cur.execute(query, (f"%{busqueda}%", busqueda))
+                return cur.fetchall()
+        except Exception as e:
+            print(f"Error en consulta rápida: {e}")
+            return []
 # .\.venv\Scripts\activate.bat
