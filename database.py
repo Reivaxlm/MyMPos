@@ -46,8 +46,12 @@ class Database:
                 cur.execute("SELECT valor FROM configuracion WHERE clave = 'tasa_bcv'")
                 res = cur.fetchone()
                 return float(res[0]) if res else 1.0
+<<<<<<< HEAD
         except Exception as e:
             print(f"Error obtener_tasa_guardada: {e}")
+=======
+        except:
+>>>>>>> 5b5b5a3511f95491ce22714eb7fecf2df4bbb09a
             return 1.0
 
     # Métodos CRUD básicos usados por la interfaz
