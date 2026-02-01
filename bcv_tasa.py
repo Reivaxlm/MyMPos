@@ -20,14 +20,9 @@ def obtener_tasa_bcv(self=None):
             tasa = float(data['promedio'])
             print(f"[{datetime.now()}] Tasa obtenida vía API: {tasa}")
             return tasa
-<<<<<<< HEAD
     except Exception as e:
         print(f"[{datetime.now()}] Falló API DolarApi: {e}")
         # Si falla la API, intentamos con el BCV directo
-=======
-    except:
-        pass # Si falla la API, intentamos con el BCV directo
->>>>>>> 5b5b5a3511f95491ce22714eb7fecf2df4bbb09a
 
     # 2. INTENTO CON BCV DIRECTO (Tu código original mejorado)
     try:

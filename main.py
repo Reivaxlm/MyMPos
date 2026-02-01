@@ -411,8 +411,8 @@ class MyMPos(ctk.CTk):
                 
                 # Nombre
                 ctk.CTkLabel(fila, text=nombre.upper(), font=("Arial", 12, "bold"), width=200, anchor="w").pack(side="left", padx=10)
-                precio_usd = precio # El valor que viene de la DB
-                precio_bs = precio_usd * self.tasa # Conversión
+                precio_usd = float(precio) # El valor que viene de la DB, forzamos float
+                precio_bs = precio_usd * float(self.tasa) # Conversión
 
                 # Mostramos ambos precios con formato profesional
                 ctk.CTkLabel(
