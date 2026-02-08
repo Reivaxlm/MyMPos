@@ -267,35 +267,45 @@ class MyMPos(ctk.CTk):
         pago_center.pack(anchor='center', pady=4)
 
         payment_box = ctk.CTkFrame(pago_center, corner_radius=15, fg_color="#1f1f1f")
-        payment_box.pack(padx=10, pady=10, fill="x") # Aumentamos pady a 10
+        payment_box.pack(padx=10, pady=10, fill="x")
 
-        # Label "Método de pago" con un poco más de espacio
         ctk.CTkLabel(payment_box, text="Método de pago:", font=("Arial", 13, "bold")).pack(side='left', padx=(20,10), pady=15)
 
         pagos_frame = ctk.CTkFrame(payment_box, fg_color="transparent")
         pagos_frame.pack(side='left', padx=10, fill="x", expand=True)
 
         self.payment_buttons = {}
-        # He ajustado el tamaño de los botones para que sean más uniformes
+        # Lista de pagos sin el menú de efectivo
         pagos = [("Efectivo","efectivo"), ("Tarjeta","tarjeta"), ("Biopago","biopago"), ("Transferencia","transferencia"), ("Pago Móvil","pago movil")]
         
         for text, key in pagos:
-            # Si el botón es Efectivo, le asignamos la función del menú
-            comando = self._mostrar_menu_efectivo if key == "efectivo" else lambda k=key: self._set_metodo_pago(k)
-            
             btn = ctk.CTkButton(
                 pagos_frame, 
                 text=text, 
-                width=120, 
+                width=110, 
                 height=40,
                 fg_color="#2b2b2b", 
                 corner_radius=10, 
-                command=comando
+                command=lambda k=key: self._set_metodo_pago(k) # Volvemos al comando simple
             )
-            btn.pack(side='left', padx=8, pady=10)
+            btn.pack(side='left', padx=5, pady=10)
             self.payment_buttons[key] = btn
 
-        # Área de referencia
+        # --- SECTOR DE OPCIONES DINÁMICAS (Debajo de los botones) ---
+        
+        # 1. Selector de Moneda FIJO (Solo se muestra si eligen Efectivo)
+        self.moneda_frame = ctk.CTkFrame(pago_center, fg_color="transparent")
+        ctk.CTkLabel(self.moneda_frame, text="Moneda del Efectivo:", font=("Arial", 11, "bold")).pack(side='left', padx=(0,8))
+        
+        self.opcion_moneda = ctk.CTkSegmentedButton(
+            self.moneda_frame, 
+            values=["Dólares ($)", "Bolívares (Bs)"],
+            command=self._cambiar_tipo_moneda_efectivo # Esta es la función que guarda la elección
+        )
+        self.opcion_moneda.set("Dólares ($)")
+        self.opcion_moneda.pack(side='left')
+
+        # 2. Área de referencia (Tu código original de referencia)
         self.referencia_frame = ctk.CTkFrame(pago_center, fg_color="transparent")
         ctk.CTkLabel(self.referencia_frame, text="Referencia:", font=("Arial", 11)).pack(side='left', padx=(0,8))
         self.entry_referencia = ctk.CTkEntry(self.referencia_frame, width=420)
@@ -340,9 +350,8 @@ class MyMPos(ctk.CTk):
                                      font=("Arial", 30, "bold"), text_color="#27ae60")
         self.lbl_total.pack(side="left", padx=30, pady=10)
 
-        self.btn_cobrar = ctk.CTkButton(self.frame_total, text="COBRAR VENTA", fg_color="green",
-                                       height=50, width=200, font=("Arial", 14, "bold"),
-                                       command=self.finalizar_venta)
+        self.btn_cobrar = ctk.CTkButton(self.frame_total, text="COBRAR VENTA", command=self.presionar_boton_cobrar, fg_color="green",
+                                       height=50, width=200, font=("Arial", 14, "bold"))
         self.btn_cobrar.pack(side="right", padx=30, pady=10)
 
         # --- BOTÓN DE CIERRE LIMPIO ---
@@ -518,8 +527,8 @@ class MyMPos(ctk.CTk):
         if codigo_a_quitar:
             del self.carrito[codigo_a_quitar]
             # IMPORTANTE: Actualizar la pantalla y el total
-            self.actualizar_total_interfaz()
             self._refrescar_vista_carrito()
+            self.actualizar_total_interfaz()
 
     def _mostrar_menu_contextual(self, event):
         # Selecciona la fila donde se hizo clic derecho
@@ -867,6 +876,7 @@ class MyMPos(ctk.CTk):
             self.lista_sugerencias.delete(0, tk.END)
             self.lista_sugerencias.place_forget() 
             self._refrescar_vista_carrito()
+            self.actualizar_total_interfaz()
             self.entry_buscar.focus()
 
     def actualizar_total_interfaz(self):
@@ -907,13 +917,17 @@ class MyMPos(ctk.CTk):
         dlg = ClienteDialog(self, self.db)
         self.wait_window(dlg)
         
-        if dlg.result: # 'result' es lo que definiste en el diálogo
+        # Verificamos que el botón no haya sido destruido por error
+        if not self.btn_cliente.winfo_exists():
+            return
+
+        if dlg.result: 
             self.current_client = dlg.result
             self.btn_cliente.configure(text=f"Cliente: {self.current_client[1]}", fg_color="#2ecc71")
-            # IMPORTANTE: Refrescar la tabla del carrito después de elegir cliente
             self._refrescar_vista_carrito()
         else:
-            self.current_client = None
+            # Si quieres que por defecto sea Consumidor Final, asígnalo aquí
+            self.current_client = ("0", "Consumidor Final", "N/A") 
             self.btn_cliente.configure(text="Cliente: Consumidor Final", fg_color="#1976d2")
             
 
@@ -940,24 +954,28 @@ class MyMPos(ctk.CTk):
 
     def _set_metodo_pago(self, metodo):
         self.metodo_seleccionado = metodo
-        # Mostrar u ocultar referencia
-        if metodo in ("transferencia", "pago movil"):
-            # mostrar el marco de referencia centrado y habilitar entrada
-            try:
-                self.referencia_frame.pack(pady=(8,6))
-                self.entry_referencia.configure(state='normal')
-                self.entry_referencia.delete(0, 'end')
-                self.entry_referencia.focus()
-            except Exception:
-                pass
+        
+        # Mostrar selector de moneda si es efectivo
+        if metodo == "efectivo":
+            self.moneda_frame.pack(pady=5)
+            self._cambiar_tipo_moneda_efectivo(self.opcion_moneda.get())
         else:
-            # ocultar el marco de referencia
-            try:
-                self.referencia_frame.pack_forget()
-                self.entry_referencia.delete(0, 'end')
-            except Exception:
-                pass
+            self.moneda_frame.pack_forget()
+
+        # Mostrar cuadro de referencia si es transferencia o pago móvil
+        if metodo in ("transferencia", "pago movil"):
+            self.referencia_frame.pack(pady=5)
+        else:
+            self.referencia_frame.pack_forget()
+
         self._update_payment_buttons()
+
+    def _cambiar_tipo_moneda_efectivo(self, valor):
+        """Actualiza el método interno según el SegmentedButton"""
+        if "Dólares" in valor:
+            self.metodo_seleccionado = "efectivo_usd"
+        else:
+            self.metodo_seleccionado = "efectivo_bs"
 
     def _update_payment_buttons(self):
         for key, btn in self.payment_buttons.items():
@@ -966,137 +984,249 @@ class MyMPos(ctk.CTk):
             else:
                 btn.configure(fg_color="#2b2b2b", text_color="#d1d1d1")
 
-    def confirmar_registro_completo(self, ventana_emergente, datos):
-        """Procesa el guardado final en la base de datos con el desglose multimoneda"""
+    def presionar_boton_cobrar(self):
+        """Esta es la función que debe ejecutar tu botón 'COBRAR'"""
+        
+        # 1. Validación de Carrito (¿Hay algo que vender?)
+        if not self.carrito: # O len(self.carrito) == 0
+            messagebox.showwarning("Carrito Vacío", "Debes agregar al menos un producto al carrito.")
+            return
+
+        # 2. Validación de Cliente
+        if not hasattr(self, 'current_client') or self.current_client is None:
+            messagebox.showwarning("Falta Cliente", "Debes seleccionar un cliente.")
+            return
+
+        # 3. Validación de Método de Pago (¿Cómo van a pagar?)
+        if not hasattr(self, 'metodo_seleccionado') or self.metodo_seleccionado is None:
+            messagebox.showwarning("Falta Método", "Selecciona un método de pago.")
+            return
+
+        # SI PASA TODAS LAS VALIDACIONES, ENTONCES ABRE LA VENTANA QUE HICIMOS
+        self.finalizar_venta()
+
+    def confirmar_registro_completo(self, ventana_cobro, datos_pago):
+        """Procesa el guardado final de la venta con el desglose de pagos"""
         try:
-            # Extraer IDs de seguridad
-            u_id = str(self.current_user[0]) if self.current_user else "1"
-            c_id = self.current_client[0] if self.current_client else None
+            # 1. Extraer datos del carrito y pagos
+            total_usd = self.actualizar_total_interfaz()
+            usuario_id = getattr(self, 'usuario_actual_id', 1) # Por defecto 1 si no hay login
             
-            # 1. GUARDAR EN BASE DE DATOS
-            # Enviamos el desglose detallado
+            # Convertimos los montos de la ventana a números limpios
+            p_usd = float(datos_pago['usd'] or 0)
+            p_bs_e = float(datos_pago['bs_e'] or 0)
+            p_bs_p = float(datos_pago['bs_p'] or 0)
+            p_bs_t = float(datos_pago['bs_t'] or 0)
+            referencia = datos_pago['ref']
+
+            # 2. Guardar la venta en la base de datos
+            # Pasamos todos los montos por separado para los reportes de Luis
             venta_id = self.db.crear_venta(
-                carrito=self.carrito,
-                usuario_id=u_id,
-                cliente_id=c_id,
-                metodo_pago="Mixto", 
-                referencia=datos['ref'],
-                # Desglose para el cierre de caja
-                pago_usd=float(datos['usd'] or 0),
-                pago_bs_efec=float(datos['bs_e'] or 0),
-                pago_bs_digital=float(datos['bs_d'] or 0)
+            datos_pago=datos_pago, # El que trae usd, bs_e, bs_p, bs_t y ref
+            carrito=self.mostrar_ventas,        # Tu lista de productos actual
+            vendedor_id=self.current_user[0],  # El ID que sale de tu login
+            cliente_id=self.current_client[0], # El ID que sale de tu diálogo de cliente
+            tasa=self.tasa
             )
 
             if venta_id:
-                # 2. GENERAR PDF
-                self.generar_recibo_pdf(venta_id)
+                # 3. Guardar los productos de la venta (el detalle)
+                for codigo, info in self.carrito.items():
+                    self.db.insertar_detalle_venta(
+                        venta_id, 
+                        codigo, 
+                        info['cantidad'], 
+                        info['precio'], 
+                        info['subtotal']
+                    )
+                    # Opcional: Restar del inventario
+                    self.db.restar_stock(codigo, info['cantidad'])
 
-                # 3. LIMPIEZA TOTAL
-                self.carrito = {}
-                self.current_client = None
-                if hasattr(self, 'entry_referencia'):
-                    self.entry_referencia.delete(0, 'end')
+                messagebox.showinfo("Éxito", f"Venta #{venta_id} registrada correctamente.")
                 
+                # 4. Limpiar todo para la siguiente venta
+                self.carrito.clear()
                 self._refrescar_vista_carrito()
-                ventana_emergente.destroy()
+                self.actualizar_total_interfaz()
+                self.entry_referencia.delete(0, tk.END) # Limpiar referencia de la principal
                 
-                messagebox.showinfo("Éxito", f"Venta #{venta_id} registrada.\nDesglose guardado correctamente.")
+                ventana_cobro.destroy() # Cerrar ventana de cobro
+                self.entry_buscar.focus() # Listos para el siguiente producto
             else:
-                messagebox.showerror("Error", "La base de datos rechazó la venta.")
+                messagebox.showerror("Error", "No se pudo guardar la venta en la base de datos.")
 
         except Exception as e:
-            messagebox.showerror("Error Crítico", f"Fallo al registrar: {e}")
+            messagebox.showerror("Error Crítico", f"Ocurrió un error al procesar: {e}")
+
+    def registrar_final():
+            # 1. Calculamos los totales de los campos de la ventana
+            monto_punto_bio = float(var_punto.get() or 0) + float(var_biopago.get() or 0)
+            monto_transf_pm = sum(float(b["monto"].get() or 0) for b in self.lista_bancos)
+            
+            # 2. Obtenemos el total real del carrito (el que calculamos al abrir la ventana)
+            # Asegúrate de usar la variable correcta de tu clase, ej: self.total_actual_usd
+            total_de_la_venta = total_usd 
+
+            # 3. Unificamos las referencias
+            todas_las_refs = ", ".join([f"{b['tipo'].get()}: {b['ref'].get()}" for b in self.lista_bancos if b['ref'].get()])
+
+            # 4. PASAMOS EL DICCIONARIO COMPLETO (Aquí es donde faltaba 'total_usd')
+            datos_para_db = {
+                "total_usd": total_usd,  # <--- ESTA ES LA LÍNEA MÁGICA
+                "usd": var_usd.get(),
+                "bs_e": var_bs_efec.get(),
+                "bs_p": str(monto_punto_bio),
+                "bs_t": str(monto_transf_pm),
+                "ref": todas_las_refs
+            }
+
+            self.confirmar_registro_completo(vent_pago, datos_para_db)
 
     def finalizar_venta(self):
-        """Abre ventana de cobro multimoneda con registro detallado"""
-        # --- 1. VALIDACIONES DE SEGURIDAD ---
-        if not hasattr(self, 'current_user') or self.current_user is None:
-            messagebox.showerror("Error", "Inicie sesión.")
-            return
-
-        if not self.carrito:
-            messagebox.showwarning("Atención", "El carrito está vacío.")
-            return
-
-        total_usd = sum(float(info['subtotal']) for info in self.carrito.values())
+        total_usd = self.actualizar_total_interfaz() 
         total_bs = total_usd * self.tasa
 
         vent_pago = ctk.CTkToplevel(self)
-        vent_pago.title("Caja: Pago Móvil / Transferencia / Efectivo")
-        vent_pago.geometry("550x600")
+        vent_pago.title("Caja: Finalizar Venta")
+        vent_pago.geometry("650x900")
+        vent_pago.attributes("-topmost", True)
         vent_pago.grab_set()
 
-        # Variables
-        var_usd = tk.StringVar(value="0")
-        var_bs_efec = tk.StringVar(value="0")
-        var_bs_dig = tk.StringVar(value="0")
-        var_ref = tk.StringVar(value=self.entry_referencia.get().strip())
+        # Variables de montos fijos
+        var_usd = tk.StringVar(value="0.00")       
+        var_bs_efec = tk.StringVar(value="0.00")
+        var_punto = tk.StringVar(value="0.00")
+        var_biopago = tk.StringVar(value="0.00")
 
-        # Auto-relleno inteligente basado en lo que Luis marcó en la principal
-        if self.metodo_seleccionado in ["pago movil", "transferencia", "tarjeta"]:
-            var_bs_dig.set(f"{total_bs:.2f}")
-        elif self.metodo_seleccionado == "efectivo":
-            var_usd.set(f"{total_usd:.2f}")
+        # --- LÓGICA DE AUTO-RELLENO INICIAL ---
+        metodo_ini = getattr(self, 'metodo_seleccionado', 'efectivo_usd')
+        if metodo_ini == "efectivo_usd": var_usd.set(f"{total_usd:.2f}")
+        elif metodo_ini == "efectivo_bs": var_bs_efec.set(f"{total_bs:.2f}")
+        elif metodo_ini == "tarjeta": var_punto.set(f"{total_bs:.2f}")
+        elif metodo_ini == "biopago": var_biopago.set(f"{total_bs:.2f}")
 
-        # --- Interfaz de la ventana ---
-        ctk.CTkLabel(vent_pago, text="RESUMEN MULTIMONEDA", font=("Arial", 18, "bold")).pack(pady=10)
+        ctk.CTkLabel(vent_pago, text="RESUMEN DE COBRO", font=("Arial", 22, "bold")).pack(pady=10)
         
-        f_montos = ctk.CTkFrame(vent_pago, fg_color="transparent")
-        f_montos.pack(fill="x", padx=40)
+        # 1. BLOQUE DE EFECTIVO
+        f_efectivo = ctk.CTkFrame(vent_pago, fg_color="transparent")
+        f_efectivo.pack(fill="x", padx=40, pady=5)
+        
+        def crear_fila(master, label, var, color=None):
+            f = ctk.CTkFrame(master, fg_color="transparent")
+            f.pack(fill="x", pady=2)
+            ctk.CTkLabel(f, text=label, width=180, anchor="w").pack(side="left")
+            ent = ctk.CTkEntry(f, textvariable=var, width=150, font=("Arial", 14, "bold"), border_color=color)
+            ent.pack(side="left", padx=10)
+            ent.bind("<Button-1>", lambda e: var.set("") if float(var.get() or 0) >= total_usd else None)
 
-        # Filas de entrada
-        def fila(txt, var, r):
-            ctk.CTkLabel(f_montos, text=txt).grid(row=r, column=0, sticky="w", pady=10)
-            ctk.CTkEntry(f_montos, textvariable=var, width=150).grid(row=r, column=1, padx=10)
+        ctk.CTkLabel(f_efectivo, text="DINERO EN EFECTIVO", font=("Arial", 11, "bold"), text_color="#5dade2").pack(anchor="w")
+        crear_fila(f_efectivo, "Dólares ($):", var_usd, "#27ae60")
+        crear_fila(f_efectivo, "Bolívares (Bs):", var_bs_efec)
 
-        fila("Efectivo $:", var_usd, 0)
-        fila("Efectivo Bs:", var_bs_efec, 1)
-        fila("Digital (PM/Transf):", var_bs_dig, 2)
+        # 2. BLOQUE DE TARJETAS (PUNTO / BIOPAGO)
+        f_tarjetas = ctk.CTkFrame(vent_pago, fg_color="transparent")
+        f_tarjetas.pack(fill="x", padx=40, pady=10)
+        ctk.CTkLabel(f_tarjetas, text="TARJETAS (PUNTO / BIOPAGO)", font=("Arial", 11, "bold"), text_color="#a569bd").pack(anchor="w")
+        crear_fila(f_tarjetas, "Punto de Venta:", var_punto, "#2980b9")
+        crear_fila(f_tarjetas, "Biopago:", var_biopago, "#16a085")
 
-        # Referencia obligatoria para Digital
-        ctk.CTkLabel(vent_pago, text="NÚMERO DE REFERENCIA (Obligatorio para PM/Transf):", font=("Arial", 12, "bold")).pack(pady=(15,0))
-        ent_ref = ctk.CTkEntry(vent_pago, textvariable=var_ref, placeholder_text="Ej: 4589...", width=300)
-        ent_ref.pack(pady=5)
+        # 3. BLOQUE DINÁMICO (PAGO MÓVIL / TRANSFERENCIA)
+        ctk.CTkLabel(vent_pago, text="PAGOS BANCARIOS (CON REFERENCIA)", font=("Arial", 11, "bold"), text_color="#f4d03f").pack(padx=40, anchor="w")
+        
+        f_scroll = ctk.CTkScrollableFrame(vent_pago, height=200, fg_color="#1a1a1a")
+        f_scroll.pack(fill="x", padx=30, pady=5)
 
-        lbl_info = ctk.CTkLabel(vent_pago, text="", font=("Arial", 13))
-        lbl_info.pack(pady=10)
+        self.lista_bancos = []
 
+        def agregar_bancario(tipo="Pago Móvil", monto="0.00"):
+            f_l = ctk.CTkFrame(f_scroll, fg_color="transparent")
+            f_l.pack(fill="x", pady=3)
+            
+            cb = ctk.CTkComboBox(f_l, values=["Pago Móvil", "Transferencia"], width=130)
+            cb.set(tipo)
+            cb.pack(side="left", padx=2)
+            
+            en_m = ctk.CTkEntry(f_l, placeholder_text="Monto Bs", width=100)
+            en_m.insert(0, monto)
+            en_m.pack(side="left", padx=2)
+            
+            en_r = ctk.CTkEntry(f_l, placeholder_text="Referencia", width=140)
+            en_r.pack(side="left", padx=2)
+
+            btn_d = ctk.CTkButton(f_l, text="✕", width=30, fg_color="#c0392b", command=lambda: eliminar_l(f_l, obj))
+            btn_d.pack(side="left", padx=2)
+
+            obj = {"tipo": cb, "monto": en_m, "ref": en_r}
+            self.lista_bancos.append(obj)
+            en_m.bind("<KeyRelease>", lambda e: validar())
+            validar()
+
+        def eliminar_l(frame, d):
+            self.lista_bancos.remove(d)
+            frame.destroy()
+            validar()
+
+        ctk.CTkButton(vent_pago, text="+ Otro Pago Móvil / Transf", width=200, height=30, command=agregar_bancario).pack(pady=5)
+
+        # Carga inicial bancaria si aplica
+        if metodo_ini in ["pago movil", "transferencia"]:
+            t = "Pago Móvil" if metodo_ini == "pago movil" else "Transferencia"
+            agregar_bancario(t, f"{total_bs:.2f}")
+
+        lbl_status = ctk.CTkLabel(vent_pago, text="", font=("Arial", 15, "bold"))
+        lbl_status.pack(pady=10)
+
+        # --- VALIDACIÓN ---
         def validar(*args):
             try:
-                p_usd = float(var_usd.get() or 0)
-                p_bs_d = float(var_bs_dig.get() or 0)
-                p_bs_e = float(var_bs_efec.get() or 0)
-                total_p = p_usd + (p_bs_d / self.tasa) + (p_bs_e / self.tasa)
+                # Sumatoria de todo lo que Luis ingresó en la ventana
+                v_usd = float(var_usd.get() or 0)
+                v_bs_efec = float(var_bs_efec.get() or 0)
+                v_bs_tarjetas = float(var_punto.get() or 0) + float(var_biopago.get() or 0)
+                v_bs_bancos = sum(float(b["monto"].get() or 0) for b in self.lista_bancos)
                 
-                referencia = var_ref.get().strip()
-                falta = total_usd - total_p
+                # Convertimos todo a USD para comparar con el total del carrito
+                total_ingresado_usd = v_usd + ((v_bs_efec + v_bs_tarjetas + v_bs_bancos) / self.tasa)
+                
+                diferencia_usd = total_ingresado_usd - total_usd
+                diferencia_bs = diferencia_usd * self.tasa # Convertimos la diferencia a Bs
 
-                # Lógica estricta de referencia
-                if p_bs_d > 0 and len(referencia) < 4:
-                    lbl_info.configure(text="⚠️ INGRESE REFERENCIA BANCARIA", text_color="#f39c12")
-                    btn_reg.configure(state="disabled")
-                    ent_ref.configure(border_color="#f39c12")
-                elif falta > 0.01:
-                    lbl_info.configure(text=f"⚠️ FALTAN: ${falta:,.2f}", text_color="#e74c3c")
-                    btn_reg.configure(state="disabled")
+                if diferencia_usd < -0.01:
+                    # CASO: FALTA DINERO
+                    lbl_status.configure(
+                        text=f"FALTAN: ${abs(diferencia_usd):,.2f} / {abs(diferencia_bs):,.2f} Bs.", 
+                        text_color="#e74c3c"
+                    )
+                    btn_final.configure(state="disabled")
                 else:
-                    lbl_info.configure(text="✅ MONTO COMPLETO", text_color="#2ecc71")
-                    btn_reg.configure(state="normal")
-                    ent_ref.configure(border_color="gray")
-            except: pass
+                    # CASO: VUELTO O PAGO EXACTO
+                    if diferencia_usd > 0.01:
+                        lbl_status.configure(
+                            text=f"VUELTO: ${diferencia_usd:,.2f} / {diferencia_bs:,.2f} Bs.", 
+                            text_color="#2ecc71"
+                        )
+                    else:
+                        lbl_status.configure(text="✓ PAGO COMPLETO", text_color="#2ecc71")
+                    btn_final.configure(state="normal")
+            except:
+                pass
 
-        # Escuchar cambios en todo
-        for v in [var_usd, var_bs_dig, var_bs_efec, var_ref]:
+        for v in [var_usd, var_bs_efec, var_punto, var_biopago]:
             v.trace_add("write", validar)
 
-        btn_reg = ctk.CTkButton(vent_pago, text="REGISTRAR VENTA", height=50, fg_color="#27ae60",
-                                state="disabled", font=("Arial", 16, "bold"),
-                                command=lambda: self.confirmar_registro_completo(vent_pago, {
-                                    "usd": var_usd.get(), "bs_e": var_bs_efec.get(), 
-                                    "bs_d": var_bs_dig.get(), "ref": var_ref.get()
-                                }))
-        btn_reg.pack(pady=20, padx=40, fill="x")
-        
+        def procesar():
+            m_digital = float(var_punto.get() or 0) + float(var_biopago.get() or 0) + sum(float(b["monto"].get() or 0) for b in self.lista_bancos)
+            # Unir todas las referencias (incluyendo Punto/Bio si Luis anotó algo en el futuro, aunque aquí son fijos)
+            r_final = ", ".join([f"{b['tipo'].get()}: {b['ref'].get()}" for b in self.lista_bancos if float(b['monto'].get() or 0) > 0])
+            
+            self.confirmar_registro_completo(vent_pago, {
+                "usd": var_usd.get(), "bs_e": var_bs_efec.get(), 
+                "bs_p": str(float(var_punto.get() or 0) + float(var_biopago.get() or 0)), 
+                "bs_t": str(sum(float(b["monto"].get() or 0) for b in self.lista_bancos)), "ref": r_final
+            })
+
+        btn_final = ctk.CTkButton(vent_pago, text="REGISTRAR VENTA", height=60, font=("Arial", 18, "bold"), fg_color="#27ae60", command=procesar)
+        btn_final.pack(pady=20, padx=40, fill="x")
         validar()
 
     def limpiar_formulario_inv(self):
@@ -1108,8 +1238,8 @@ class MyMPos(ctk.CTk):
         self.in_sto.delete(0, 'end')
         self.in_min.delete(0, 'end')
 
-    def generar_recibo_pdf(self, venta_id):
-        # 1. Recuperar datos desde DB (Asegúrate de usar la consulta con JOIN en database.py)
+    def generar_recibo_pdf(self, venta_id, datos_pago=None): # Añadimos datos_pago como opcional
+        # 1. Recuperar datos desde DB
         venta = self.db.obtener_venta(venta_id)
         items = self.db.obtener_items_venta(venta_id)
 
@@ -1142,25 +1272,20 @@ class MyMPos(ctk.CTk):
         # --- INFO DE VENTA ---
         c.setFont("Helvetica-Bold", 11)
         c.drawString(x, y, f"RECIBO N°: {venta_id}")
-        
         fecha_str = venta[1].strftime('%d/%m/%Y %H:%M') if hasattr(venta[1], 'strftime') else str(venta[1])
         c.drawRightString(width-50, y, f"Fecha: {fecha_str}")
         y -= 15
         
+        # --- CLIENTE Y CAJERO (Agregado) ---
         nombre_cl = venta[6] if (len(venta) > 6 and venta[6]) else "CONSUMIDOR FINAL"
         cedula_cl = venta[7] if (len(venta) > 7 and venta[7]) else "N/A"
-        
+        nombre_vendedor = venta[8] if len(venta) > 8 else (self.current_user[1] if self.current_user else "Luis")
+
         c.setFont("Helvetica-Bold", 10)
         c.drawString(x, y, f"CLIENTE: {nombre_cl}")
-        c.drawRightString(width-50, y, f"PAGO: {venta[3]}") 
+        c.drawRightString(width-50, y, f"CEDULA/RIF: {cedula_cl}") 
         y -= 12
-        c.setFont("Helvetica", 10)
-        c.drawString(x, y, f"CÉDULA/RIF: {cedula_cl}")
-        
-        # --- CAMBIO AQUÍ: Mostrar NOMBRE en lugar de UUID ---
-        # Si nuestra nueva consulta trae el nombre en la posición [8], lo usamos:
-        nombre_vendedor = venta[8] if len(venta) > 8 else str(venta[4])[:8]
-        c.drawRightString(width-50, y, f"VENDEDOR: {nombre_vendedor}")
+        c.drawString(x, y, f"CAJERO: {nombre_vendedor}")
         y -= 25
 
         # --- TABLA DE PRODUCTOS ---
@@ -1174,58 +1299,54 @@ class MyMPos(ctk.CTk):
         y -= 15
 
         c.setFont("Helvetica", 10)
-        total_usd = float(venta[2])
-        tasa = getattr(self, 'tasa', 1.0) 
-
         for it in items:
-            p_id = it[0]
-            cant = it[1]
-            p_unit = float(it[2])
-            subtot = float(it[3])
-            
+            p_id, cant, p_unit, subtot = it[0], it[1], float(it[2]), float(it[3])
             prod = self.db.get_producto_por_id(p_id)
             nombre = prod[2] if prod else f"Producto ID {p_id}"
-
             c.drawString(x, y, str(cant))
             c.drawString(x + 50, y, nombre[:35]) 
             c.drawRightString(width - 120, y, f"{p_unit:,.2f}")
             c.drawRightString(width - 50, y, f"{subtot:,.2f}")
-            
             y -= 15
-            if y < 100:
-                c.showPage()
-                y = height - 50
 
-        # --- TOTALES ---
+        # --- TOTALES Y DESGLOSE (Agregado) ---
+        total_usd = float(venta[2])
+        tasa = getattr(self, 'tasa', 1.0) 
         y -= 10
         c.line(width-200, y, width-50, y)
         y -= 20
         c.setFont("Helvetica-Bold", 12)
         c.drawRightString(width - 150, y, "TOTAL USD:")
         c.drawRightString(width - 50, y, f"$ {total_usd:,.2f}")
-        
         y -= 18
-        c.setFont("Helvetica-Bold", 11)
         c.drawRightString(width - 150, y, "TOTAL BS:")
         c.drawRightString(width - 50, y, f"Bs. {total_usd * tasa:,.2f}")
-        
-        # Referencia (Ahora es la posición [5] según la estructura que pasaste)
-        if len(venta) > 5 and venta[5]:
-            y -= 15
+
+        # Sección de Desglose de Pago (Solo si hay datos_pago)
+        if datos_pago:
+            y -= 20
+            c.setFont("Helvetica-Bold", 9)
+            c.drawString(x, y, "DETALLE DE PAGO:")
+            y -= 12
             c.setFont("Helvetica", 9)
-            c.drawString(x, y, f"Ref: {venta[5]}")
+            if float(datos_pago.get('usd', 0)) > 0:
+                c.drawString(x + 10, y, f"Efectivo $: {float(datos_pago['usd']):,.2f}"); y -= 10
+            if float(datos_pago.get('bs_e', 0)) > 0:
+                c.drawString(x + 10, y, f"Efectivo Bs: {float(datos_pago['bs_e']):,.2f}"); y -= 10
+            if float(datos_pago.get('bs_p', 0)) > 0:
+                c.drawString(x + 10, y, f"Punto/Bio: {float(datos_pago['bs_p']):,.2f} Bs"); y -= 10
+            if float(datos_pago.get('bs_t', 0)) > 0:
+                c.drawString(x + 10, y, f"Bancos/PM: {float(datos_pago['bs_t']):,.2f} Bs"); y -= 10
+            
+            if datos_pago.get('ref'):
+                c.setFont("Helvetica-Oblique", 8)
+                c.drawString(x + 10, y, f"Ref: {datos_pago['ref']}")
 
         y -= 30
         c.setFont("Helvetica-Oblique", 9)
         c.drawCentredString(width/2, y, "¡Gracias por su compra!")
-
         c.save()
-        
-        try:
-            os.startfile(path) 
-        except Exception as e:
-            print(f"Error al abrir: {e}")
-        
+        os.startfile(path)
         return path
     
     def ventana_cierre_turno(self):
@@ -1280,22 +1401,83 @@ class MyMPos(ctk.CTk):
 
         
     def imprimir_ticket_cierre(self, datos, total_general, ventana_padre):
-        from reportlab.lib.pagesizes import letter
         from reportlab.pdfgen import canvas
         import os
 
+        # Obtener nombre del cajero actual
+        nombre_cajero = self.current_user[1] if self.current_user else "Luis"
+        fecha_cierre = datetime.now().strftime("%d/%m/%Y %H:%M")
+        fecha_archivo = datetime.now().strftime("%d-%m-%Y_%H-%M")
+        filename = f"cierre_{nombre_cajero}_{fecha_archivo}.pdf"
+        
+        try:
+            c = canvas.Canvas(filename, pagesize=(226, 450))
+            width, height = 226, 450
+            
+            # Encabezado
+            c.setFont("Helvetica-Bold", 12)
+            c.drawCentredString(width/2, height - 30, "CORTE DE CAJA")
+            c.setFont("Helvetica-Bold", 10)
+            c.drawCentredString(width/2, height - 45, f"CAJERO: {nombre_cajero}")
+            c.setFont("Helvetica", 9)
+            c.drawCentredString(width/2, height - 58, f"FECHA: {fecha_cierre}")
+            c.line(10, height - 65, width - 10, height - 65)
+
+            # Detalle por método
+            y = height - 85
+            c.setFont("Helvetica-Bold", 9)
+            c.drawString(15, y, "MÉTODO (CANT)")
+            c.drawRightString(width - 15, y, "MONTO USD")
+            y -= 15
+            
+            c.setFont("Helvetica", 9)
+            # datos suele venir como [(metodo, monto, cantidad), ...]
+            for metodo, monto, cant in datos:
+                nombre_metodo = str(metodo).replace('_', ' ').upper()
+                c.drawString(15, y, f"{nombre_metodo} ({cant})")
+                c.drawRightString(width - 15, y, f"$ {float(monto):,.2f}")
+                y -= 18
+
+            # Total Final
+            y -= 10
+            c.line(10, y, width - 10, y)
+            y -= 20
+            c.setFont("Helvetica-Bold", 11)
+            c.drawString(15, y, "TOTAL GENERAL:")
+            c.drawRightString(width - 15, y, f"$ {total_general:,.2f}")
+            
+            # Espacio para firma
+            y -= 60
+            c.line(40, y, width - 40, y)
+            c.setFont("Helvetica", 8)
+            c.drawCentredString(width/2, y - 10, "Firma de Auditoría")
+
+            c.save()
+            os.startfile(filename)
+            if ventana_padre: ventana_padre.destroy()
+            messagebox.showinfo("Éxito", "Ticket de cierre generado.")
+            
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo crear el ticket: {e}")
+
+    def imprimir_ticket_cierre(self, datos, total_general, ventana_padre):
+        from reportlab.pdfgen import canvas
+        import os
+
+        # Agregamos el nombre dinámico del cajero
         nombre_cajero = self.current_user[1] if self.current_user else "Luis"
         fecha_str = datetime.now().strftime("%d-%m-%Y_%H-%M-%S")
         filename = f"cierre_{nombre_cajero}_{fecha_str}.pdf"
         
         try:
-            c = canvas.Canvas(filename, pagesize=(226, 400)) # Tamaño ticket (80mm aprox)
+            c = canvas.Canvas(filename, pagesize=(226, 400)) 
             width, height = 226, 400
             
             # Encabezado
             c.setFont("Helvetica-Bold", 12)
             c.drawCentredString(width/2, height - 30, "CORTE DE CAJA")
             c.setFont("Helvetica", 9)
+            # Aquí sale el nombre real del cajero
             c.drawCentredString(width/2, height - 45, f"Cajero: {nombre_cajero}")
             c.drawCentredString(width/2, height - 55, f"Fecha: {datetime.now().strftime('%d/%m/%Y %H:%M')}")
             c.line(10, height - 65, width - 10, height - 65)
@@ -1309,7 +1491,9 @@ class MyMPos(ctk.CTk):
             
             c.setFont("Helvetica", 10)
             for metodo, monto, cant in datos:
-                c.drawString(20, y, f"{str(metodo).upper()} ({cant})")
+                # Limpiamos el nombre del método para que no salgan guiones bajos
+                nombre_m = str(metodo).replace('_', ' ').upper()
+                c.drawString(20, y, f"{nombre_m} ({cant})")
                 c.drawRightString(width - 20, y, f"$ {float(monto):,.2f}")
                 y -= 20
 
@@ -1327,13 +1511,13 @@ class MyMPos(ctk.CTk):
             c.drawCentredString(width/2, y - 10, "Firma del Cajero")
 
             c.save()
-            os.startfile(filename) # Abre el PDF automáticamente
-            ventana_padre.destroy() # Cierra la ventana emergente
+            os.startfile(filename) 
+            ventana_padre.destroy() 
             messagebox.showinfo("Éxito", "Cierre generado correctamente.")
             
         except Exception as e:
             messagebox.showerror("Error", f"No se pudo crear el ticket: {e}")
-    
+
 class LoginDialog(ctk.CTkToplevel):
     def __init__(self, parent, db: Database):
         super().__init__(parent)

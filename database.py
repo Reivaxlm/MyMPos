@@ -12,6 +12,7 @@ class Database:
         }
 
     @contextmanager
+    
     def get_cursor(self):
         """Maneja la apertura y cierre automático de conexiones"""
         conn = psycopg2.connect(**self.config)
@@ -123,130 +124,65 @@ class Database:
             print(f"Error get_producto_por_codigo: {e}")
             return None
 
-    def crear_venta(self, carrito, usuario_id=None, cliente_id=None, metodo_pago='efectivo', caja_id=None, referencia=None):
+    def crear_venta(self, datos_pago, carrito, vendedor_id, cliente_id, tasa):
         """
-        carrito: lista de tuplas (codigo_barras, nombre, precio) o (codigo_barras, nombre, precio, cantidad)
-        Agrupa por codigo, inserta venta y detalle_ventas, y actualiza stock.
-        Retorna id de la venta si OK, o None si falla.
+        Registra la venta en la tabla 'ventas' y sus productos en 'detalle_ventas'.
+        Usa los nombres exactos de tus columnas en Supabase.
         """
         try:
-            # 1) Agrupar items por codigo. Soportamos varias estructuras:
-            # - lista de tuplas (codigo, nombre, precio) o (codigo, nombre, precio, cantidad)
-            # - diccionario {codigo: {nombre, precio, cantidad, subtotal}}
-            items = {}
-            if isinstance(carrito, dict):
-                for codigo, v in carrito.items():
-                    items[codigo] = {
-                        'nombre': v.get('nombre'),
-                        'precio': float(v.get('precio')),
-                        'cantidad': int(v.get('cantidad', 1)),
-                        'subtotal': float(v.get('precio')) * int(v.get('cantidad', 1))
-                    }
-            else:
-                for it in carrito:
-                    if isinstance(it, dict):
-                        codigo = it.get('codigo')
-                        nombre = it.get('nombre')
-                        precio = float(it.get('precio'))
-                        cantidad = int(it.get('cantidad', 1))
-                    else:
-                        if len(it) == 4:
-                            codigo, nombre, precio, cantidad = it
-                        else:
-                            codigo, nombre, precio = it
-                            cantidad = 1
-                        precio = float(precio)
-
-                    if codigo in items:
-                        items[codigo]['cantidad'] += cantidad
-                        items[codigo]['subtotal'] += precio * cantidad
-                    else:
-                        items[codigo] = {
-                            'nombre': nombre,
-                            'precio': precio,
-                            'cantidad': cantidad,
-                            'subtotal': precio * cantidad
-                        }
-
-            total = sum(v['subtotal'] for v in items.values())
-
-            # 2) Insertar venta (intentamos variantes según columnas disponibles)
             with self.get_cursor() as cur:
-                try:
-                    # intentamos insertar incluyendo referencia si fue provista
-                    if referencia is not None:
-                        cur.execute(
-                            "INSERT INTO ventas (total, metodo_pago, vendedor_id, cliente_id, caja_id, referencia) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
-                            (total, metodo_pago, usuario_id, cliente_id, caja_id, referencia)
-                        )
-                    else:
-                        cur.execute(
-                            "INSERT INTO ventas (total, metodo_pago, vendedor_id, cliente_id, caja_id) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                            (total, metodo_pago, usuario_id, cliente_id, caja_id)
-                        )
-                except Exception:
-                    # La transacción puede quedar abortada; hacemos rollback y probamos variantes
-                    try:
-                        cur.connection.rollback()
-                    except Exception:
-                        pass
-                    # variante: sin cliente_id y/o caja_id
-                    try:
-                        if referencia is not None:
-                            cur.execute(
-                                "INSERT INTO ventas (total, metodo_pago, vendedor_id, referencia) VALUES (%s, %s, %s, %s) RETURNING id",
-                                (total, metodo_pago, usuario_id, referencia)
-                            )
-                        else:
-                            cur.execute(
-                                "INSERT INTO ventas (total, metodo_pago, vendedor_id) VALUES (%s, %s, %s) RETURNING id",
-                                (total, metodo_pago, usuario_id)
-                            )
-                    except Exception:
-                        try:
-                            cur.connection.rollback()
-                        except Exception:
-                            pass
-                        # última variante: solo total
-                        if referencia is not None:
-                            # si la tabla no acepta referencia en columnas anteriores, intentamos crear solo total y referencia
-                            try:
-                                cur.execute(
-                                    "INSERT INTO ventas (total, referencia) VALUES (%s, %s) RETURNING id",
-                                    (total, referencia)
-                                )
-                            except Exception:
-                                cur.execute(
-                                    "INSERT INTO ventas (total) VALUES (%s) RETURNING id",
-                                    (total,)
-                                )
-                        else:
-                            cur.execute(
-                                "INSERT INTO ventas (total) VALUES (%s) RETURNING id",
-                                (total,)
-                            )
+                # 1. Insertamos en la tabla ventas (Cabecera)
+                # Nota: Usamos 'vendedor_id' y 'tasa_dia' que son tus nombres reales
+                query_venta = """
+                    INSERT INTO ventas (
+                        vendedor_id, 
+                        cliente_id, 
+                        total_usd, 
+                        tasa_dia, 
+                        pago_usd, 
+                        pago_bs_efec, 
+                        pago_bs_punto, 
+                        pago_bs_trans, 
+                        referencia,
+                        fecha
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    RETURNING id
+                """
+                
+                cur.execute(query_venta, (
+                    vendedor_id,
+                    cliente_id,
+                    datos_pago['total_usd'],
+                    tasa,
+                    float(datos_pago['usd'] or 0),
+                    float(datos_pago['bs_e'] or 0),
+                    float(datos_pago['bs_p'] or 0),
+                    float(datos_pago['bs_t'] or 0),
+                    datos_pago['ref']
+                ))
+                
                 venta_id = cur.fetchone()[0]
 
-                # 3) Insertar detalle_ventas y restar stock
-                for codigo, v in items.items():
-                    # obtener producto_id
-                    cur.execute("SELECT id, stock FROM productos WHERE codigo_barras = %s", (codigo,))
-                    prod = cur.fetchone()
-                    producto_id = prod[0] if prod else None
-                    current_stock = prod[1] if prod else None
+                # 2. Insertamos en detalle_ventas (La tabla que me pasaste)
+                query_detalle = """
+                    INSERT INTO detalle_ventas (
+                        venta_id, producto_id, cantidad, precio_unitario, subtotal
+                    ) VALUES (%s, %s, %s, %s, %s)
+                """
 
-                    cur.execute(
-                        "INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (%s, %s, %s, %s, %s)",
-                        (venta_id, producto_id, v['cantidad'], v['precio'], v['subtotal'])
-                    )
+                for item in carrito:
+                    # Ajusta 'id', 'cantidad', etc., según como guardes los datos en tu lista carrito
+                    cur.execute(query_detalle, (
+                        venta_id,
+                        item['id'],
+                        item['cantidad'],
+                        item['precio_unitario'],
+                        item['subtotal']
+                    ))
 
-                    if producto_id is not None:
-                        # actualizar stock
-                        cur.execute("UPDATE productos SET stock = stock - %s WHERE id = %s", (v['cantidad'], producto_id))
-
-            return venta_id
+                return venta_id
         except Exception as e:
-            print(f"Error crear_venta: {e}")
+            print(f"Error crítico al registrar: {e}")
             return None
 
     def obtener_venta(self, venta_id):
