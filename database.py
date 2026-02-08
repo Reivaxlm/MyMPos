@@ -1,4 +1,5 @@
 import os
+import re
 import psycopg2
 from contextlib import contextmanager
 from dotenv import load_dotenv
@@ -107,6 +108,20 @@ class Database:
             print(f"Error obtener_todos_los_productos: {e}")
             return []
 
+    def buscar_productos_por_texto(self, texto, limit=12):
+        """Busca productos por nombre o código usando ILIKE y limita resultados para rapidez."""
+        try:
+            with self.get_cursor() as cur:
+                patron = f"%{texto}%"
+                cur.execute(
+                    "SELECT codigo_barras, nombre, precio_venta, stock FROM productos WHERE nombre ILIKE %s OR codigo_barras ILIKE %s ORDER BY nombre LIMIT %s",
+                    (patron, patron, limit)
+                )
+                return cur.fetchall()
+        except Exception as e:
+            print(f"Error buscar_productos_por_texto: {e}")
+            return []
+
     def obtener_productos_bajo_stock(self):
         """Devuelve lista de productos cuyo stock es menor o igual a stock_minimo.
         Retorna filas completas de la tabla productos.
@@ -142,34 +157,50 @@ class Database:
         Inserta la cabecera de la venta y devuelve el id generado.
         El detalle de la venta debe insertarlo quien llama (atomicidad manejada por get_cursor).
         """
+        def _to_float(val):
+            if val is None:
+                return 0.0
+            if isinstance(val, (int, float)):
+                return float(val)
+            s = str(val).strip()
+            if s == "":
+                return 0.0
+            s = s.replace(' ', '').replace('$', '').replace('US$', '').replace('Bs.', '').replace('Bs', '')
+            if ',' in s and '.' in s:
+                if s.rfind(',') > s.rfind('.'):
+                    s = s.replace('.', '').replace(',', '.')
+                else:
+                    s = s.replace(',', '')
+            elif ',' in s:
+                s = s.replace('.', '').replace(',', '.')
+            s = re.sub(r'[^0-9\.\-]', '', s)
+            try:
+                return float(s)
+            except Exception:
+                return 0.0
+
         try:
             with self.get_cursor() as cur:
+                # Ajustamos la inserción a las columnas reales de la tabla 'ventas' (total y metodo_pago)
+                total = _to_float(datos_pago.get('total_usd', datos_pago.get('total', 0)))
+                metodo = datos_pago.get('metodo') or 'mixto'
+
                 query_venta = """
                     INSERT INTO ventas (
                         vendedor_id,
                         cliente_id,
-                        total_usd,
-                        tasa_dia,
-                        pago_usd,
-                        pago_bs_efec,
-                        pago_bs_punto,
-                        pago_bs_trans,
-                        referencia,
+                        total,
+                        metodo_pago,
                         fecha
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
                     RETURNING id
                 """
 
                 cur.execute(query_venta, (
                     vendedor_id,
                     cliente_id,
-                    float(datos_pago.get('total_usd', 0)),
-                    float(tasa),
-                    float(datos_pago.get('usd') or 0),
-                    float(datos_pago.get('bs_e') or 0),
-                    float(datos_pago.get('bs_p') or 0),
-                    float(datos_pago.get('bs_t') or 0),
-                    datos_pago.get('ref')
+                    total,
+                    metodo
                 ))
 
                 row = cur.fetchone()

@@ -10,6 +10,42 @@ from reportlab.pdfgen import canvas
 import os
 from datetime import datetime
 from decimal import Decimal
+import re
+
+
+def parse_monto(valor):
+    """Convierte cadenas con separadores de miles/decimales variados a float.
+    Acepta formatos como '4,974.21', '4.974,21', '$ 1.234,56', '1234.56' y devuelve float.
+    """
+    if valor is None:
+        return 0.0
+    if isinstance(valor, (int, float, Decimal)):
+        return float(valor)
+    s = str(valor).strip()
+    if s == "":
+        return 0.0
+    # eliminar símbolos de moneda y espacios
+    s = s.replace(' ', '').replace('$', '').replace('US$', '').replace('Bs.', '').replace('Bs', '')
+    # Si contiene ambos separadores, detectar cuál es el decimal (el que aparece más a la derecha)
+    if ',' in s and '.' in s:
+        if s.rfind(',') > s.rfind('.'):
+            # coma es decimal, punto miles
+            s = s.replace('.', '').replace(',', '.')
+        else:
+            # punto es decimal, coma miles
+            s = s.replace(',', '')
+    elif ',' in s:
+        # Asumir coma como separador decimal
+        s = s.replace('.', '').replace(',', '.')
+    else:
+        # solo punto o solo dígitos
+        s = s
+    # eliminar cualquier caracter no numérico salvo '.' y '-'
+    s = re.sub(r'[^0-9\.\-]', '', s)
+    try:
+        return float(s)
+    except Exception:
+        return 0.0
 
 
 class MyMPos(ctk.CTk):
@@ -1063,6 +1099,11 @@ class MyMPos(ctk.CTk):
             except Exception:
                 pass
             self.entry_buscar.focus()
+            # 7. Generar recibo automáticamente
+            try:
+                self.generar_recibo_pdf(venta_id, datos_db)
+            except Exception as e:
+                print(f"Advertencia: no se pudo generar recibo PDF automáticamente: {e}")
 
         except Exception as e:
             messagebox.showerror("Error Crítico", f"Ocurrió un error al procesar: {e}")
@@ -1104,7 +1145,7 @@ class MyMPos(ctk.CTk):
             ctk.CTkLabel(f, text=label, width=180, anchor="w").pack(side="left")
             ent = ctk.CTkEntry(f, textvariable=var, width=150, font=("Arial", 14, "bold"), border_color=color)
             ent.pack(side="left", padx=10)
-            ent.bind("<Button-1>", lambda e: var.set("") if float(var.get() or 0) >= total_usd else None)
+            ent.bind("<Button-1>", lambda e: var.set("") if parse_monto(var.get() or 0) >= total_usd else None)
 
         ctk.CTkLabel(f_efectivo, text="DINERO EN EFECTIVO", font=("Arial", 11, "bold"), text_color="#5dade2").pack(anchor="w")
         crear_fila(f_efectivo, "Dólares ($):", var_usd, "#27ae60")
@@ -1167,18 +1208,20 @@ class MyMPos(ctk.CTk):
         def validar(*args):
             try:
                 # Sumatoria de todo lo que Luis ingresó en la ventana
-                v_usd = float(var_usd.get() or 0)
-                v_bs_efec = float(var_bs_efec.get() or 0)
-                v_bs_tarjetas = float(var_punto.get() or 0) + float(var_biopago.get() or 0)
-                v_bs_bancos = sum(float(b["monto"].get() or 0) for b in self.lista_bancos)
+                v_usd = parse_monto(var_usd.get())
+                v_bs_efec = parse_monto(var_bs_efec.get())
+                v_bs_tarjetas = parse_monto(var_punto.get()) + parse_monto(var_biopago.get())
+                v_bs_bancos = sum(parse_monto(b["monto"].get()) for b in self.lista_bancos)
                 
                 # Convertimos todo a USD para comparar con el total del carrito
                 total_ingresado_usd = v_usd + ((v_bs_efec + v_bs_tarjetas + v_bs_bancos) / self.tasa)
                 
                 diferencia_usd = total_ingresado_usd - total_usd
                 diferencia_bs = diferencia_usd * self.tasa # Convertimos la diferencia a Bs
+                # Umbral muy pequeño para comparaciones (evita aceptar montos incompletos)
+                epsilon = 0.0001
 
-                if diferencia_usd < -0.01:
+                if diferencia_usd < -epsilon:
                     # CASO: FALTA DINERO
                     lbl_status.configure(
                         text=f"FALTAN: ${abs(diferencia_usd):,.2f} / {abs(diferencia_bs):,.2f} Bs.", 
@@ -1187,7 +1230,7 @@ class MyMPos(ctk.CTk):
                     btn_final.configure(state="disabled")
                 else:
                     # CASO: VUELTO O PAGO EXACTO
-                    if diferencia_usd > 0.01:
+                    if diferencia_usd > epsilon:
                         lbl_status.configure(
                             text=f"VUELTO: ${diferencia_usd:,.2f} / {diferencia_bs:,.2f} Bs.", 
                             text_color="#2ecc71"
@@ -1202,14 +1245,14 @@ class MyMPos(ctk.CTk):
             v.trace_add("write", validar)
 
         def procesar():
-            m_digital = float(var_punto.get() or 0) + float(var_biopago.get() or 0) + sum(float(b["monto"].get() or 0) for b in self.lista_bancos)
+            m_digital = parse_monto(var_punto.get()) + parse_monto(var_biopago.get()) + sum(parse_monto(b["monto"].get()) for b in self.lista_bancos)
             # Unir todas las referencias (incluyendo Punto/Bio si Luis anotó algo en el futuro, aunque aquí son fijos)
-            r_final = ", ".join([f"{b['tipo'].get()}: {b['ref'].get()}" for b in self.lista_bancos if float(b['monto'].get() or 0) > 0])
+            r_final = ", ".join([f"{b['tipo'].get()}: {b['ref'].get()}" for b in self.lista_bancos if parse_monto(b['monto'].get()) > 0])
             
             self.confirmar_registro_completo(vent_pago, {
                 "usd": var_usd.get(), "bs_e": var_bs_efec.get(), 
-                "bs_p": str(float(var_punto.get() or 0) + float(var_biopago.get() or 0)), 
-                "bs_t": str(sum(float(b["monto"].get() or 0) for b in self.lista_bancos)), "ref": r_final
+                "bs_p": str(parse_monto(var_punto.get()) + parse_monto(var_biopago.get())), 
+                "bs_t": str(sum(parse_monto(b["monto"].get()) for b in self.lista_bancos)), "ref": r_final
             })
 
         btn_final = ctk.CTkButton(vent_pago, text="REGISTRAR VENTA", height=60, font=("Arial", 18, "bold"), fg_color="#27ae60", command=procesar)
