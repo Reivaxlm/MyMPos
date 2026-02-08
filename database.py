@@ -1,14 +1,21 @@
+import os
 import psycopg2
 from contextlib import contextmanager
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 class Database:
     def __init__(self):
+        # Leer configuración desde variables de entorno (seguro para despliegue)
+        # Proveer valores por defecto solo para entornos locales de desarrollo.
         self.config = {
-            "host": "aws-1-us-east-1.pooler.supabase.com",
-            "port": "6543",
-            "database": "postgres",
-            "user": "postgres.zkjxmopqdbwuqdnjnnji",
-            "password": "Megapostgrs"
+            "host": os.getenv("DB_HOST", "aws-1-us-east-1.pooler.supabase.com"),
+            "port": os.getenv("DB_PORT", "6543"),
+            "database": os.getenv("DB_NAME", "postgres"),
+            "user": os.getenv("DB_USER", "postgres.zkjxmopqdbwuqdnjnnji"),
+            "password": os.getenv("DB_PASSWORD", "Megapostgrs")
         }
 
     @contextmanager
@@ -20,12 +27,18 @@ class Database:
         try:
             yield cursor
             conn.commit()
-        except Exception as e:
+        except Exception:
             conn.rollback()
-            raise e
+            raise
         finally:
-            cursor.close()
-            conn.close()
+            try:
+                cursor.close()
+            except Exception:
+                pass
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def buscar_producto(self, criterio):
         try:
@@ -124,65 +137,45 @@ class Database:
             print(f"Error get_producto_por_codigo: {e}")
             return None
 
-    def crear_venta(self, datos_pago, carrito, vendedor_id, cliente_id, tasa):
+    def crear_venta(self, datos_pago, vendedor_id, cliente_id, tasa):
         """
-        Registra la venta en la tabla 'ventas' y sus productos en 'detalle_ventas'.
-        Usa los nombres exactos de tus columnas en Supabase.
+        Inserta la cabecera de la venta y devuelve el id generado.
+        El detalle de la venta debe insertarlo quien llama (atomicidad manejada por get_cursor).
         """
         try:
             with self.get_cursor() as cur:
-                # 1. Insertamos en la tabla ventas (Cabecera)
-                # Nota: Usamos 'vendedor_id' y 'tasa_dia' que son tus nombres reales
                 query_venta = """
                     INSERT INTO ventas (
-                        vendedor_id, 
-                        cliente_id, 
-                        total_usd, 
-                        tasa_dia, 
-                        pago_usd, 
-                        pago_bs_efec, 
-                        pago_bs_punto, 
-                        pago_bs_trans, 
+                        vendedor_id,
+                        cliente_id,
+                        total_usd,
+                        tasa_dia,
+                        pago_usd,
+                        pago_bs_efec,
+                        pago_bs_punto,
+                        pago_bs_trans,
                         referencia,
                         fecha
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                     RETURNING id
                 """
-                
+
                 cur.execute(query_venta, (
                     vendedor_id,
                     cliente_id,
-                    datos_pago['total_usd'],
-                    tasa,
-                    float(datos_pago['usd'] or 0),
-                    float(datos_pago['bs_e'] or 0),
-                    float(datos_pago['bs_p'] or 0),
-                    float(datos_pago['bs_t'] or 0),
-                    datos_pago['ref']
+                    float(datos_pago.get('total_usd', 0)),
+                    float(tasa),
+                    float(datos_pago.get('usd') or 0),
+                    float(datos_pago.get('bs_e') or 0),
+                    float(datos_pago.get('bs_p') or 0),
+                    float(datos_pago.get('bs_t') or 0),
+                    datos_pago.get('ref')
                 ))
-                
-                venta_id = cur.fetchone()[0]
 
-                # 2. Insertamos en detalle_ventas (La tabla que me pasaste)
-                query_detalle = """
-                    INSERT INTO detalle_ventas (
-                        venta_id, producto_id, cantidad, precio_unitario, subtotal
-                    ) VALUES (%s, %s, %s, %s, %s)
-                """
-
-                for item in carrito:
-                    # Ajusta 'id', 'cantidad', etc., según como guardes los datos en tu lista carrito
-                    cur.execute(query_detalle, (
-                        venta_id,
-                        item['id'],
-                        item['cantidad'],
-                        item['precio_unitario'],
-                        item['subtotal']
-                    ))
-
-                return venta_id
+                row = cur.fetchone()
+                return row[0] if row else None
         except Exception as e:
-            print(f"Error crítico al registrar: {e}")
+            print(f"Error crítico al registrar venta: {e}")
             return None
 
     def obtener_venta(self, venta_id):
@@ -220,6 +213,19 @@ class Database:
         except Exception as e:
             print(f"Error get_producto_por_id: {e}")
             return None
+
+    def insertar_detalle_venta(self, venta_id, producto_id, cantidad, precio_unitario, subtotal):
+        """Inserta una fila en `detalle_ventas`. `producto_id` puede ser el id entero o código según tu esquema."""
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(
+                    "INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (%s, %s, %s, %s, %s)",
+                    (venta_id, producto_id, cantidad, precio_unitario, subtotal)
+                )
+                return True
+        except Exception as e:
+            print(f"Error insertar_detalle_venta: {e}")
+            return False
 
     # --- Usuarios y Clientes ---
     def authenticate_user(self, username, password_hash):

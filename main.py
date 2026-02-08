@@ -17,7 +17,7 @@ class MyMPos(ctk.CTk):
         super().__init__()
         self.db = Database()
         # Obtener la tasa y forzar a `float` para evitar operaciones entre float y Decimal
-        tasa_val = obtener_tasa_bcv(self) or self.db.obtener_tasa_guardada() or 1.0
+        tasa_val = obtener_tasa_bcv() or self.db.obtener_tasa_guardada() or 1.0
         try:
             self.tasa = float(Decimal(str(tasa_val)))
         except Exception:
@@ -1008,79 +1008,66 @@ class MyMPos(ctk.CTk):
     def confirmar_registro_completo(self, ventana_cobro, datos_pago):
         """Procesa el guardado final de la venta con el desglose de pagos"""
         try:
-            # 1. Extraer datos del carrito y pagos
+            # 1. Calcular total real del carrito
             total_usd = self.actualizar_total_interfaz()
-            usuario_id = getattr(self, 'usuario_actual_id', 1) # Por defecto 1 si no hay login
-            
-            # Convertimos los montos de la ventana a números limpios
-            p_usd = float(datos_pago['usd'] or 0)
-            p_bs_e = float(datos_pago['bs_e'] or 0)
-            p_bs_p = float(datos_pago['bs_p'] or 0)
-            p_bs_t = float(datos_pago['bs_t'] or 0)
-            referencia = datos_pago['ref']
 
-            # 2. Guardar la venta en la base de datos
-            # Pasamos todos los montos por separado para los reportes de Luis
-            venta_id = self.db.crear_venta(
-            datos_pago=datos_pago, # El que trae usd, bs_e, bs_p, bs_t y ref
-            carrito=self.mostrar_ventas,        # Tu lista de productos actual
-            vendedor_id=self.current_user[0],  # El ID que sale de tu login
-            cliente_id=self.current_client[0], # El ID que sale de tu diálogo de cliente
-            tasa=self.tasa
-            )
+            # 2. Preparar el diccionario de pago que se guardará en la cabecera
+            datos_db = dict(datos_pago) if isinstance(datos_pago, dict) else {}
+            datos_db['total_usd'] = total_usd
 
-            if venta_id:
-                # 3. Guardar los productos de la venta (el detalle)
-                for codigo, info in self.carrito.items():
-                    self.db.insertar_detalle_venta(
-                        venta_id, 
-                        codigo, 
-                        info['cantidad'], 
-                        info['precio'], 
-                        info['subtotal']
-                    )
-                    # Opcional: Restar del inventario
-                    self.db.restar_stock(codigo, info['cantidad'])
+            # 3. Construir lista de items para insertar en detalle
+            carrito_items = []
+            for codigo, info in self.carrito.items():
+                producto_id = info.get('id', codigo)
+                carrito_items.append({
+                    'id': producto_id,
+                    'cantidad': int(info.get('cantidad', 1)),
+                    'precio_unitario': float(info.get('precio', 0)),
+                    'subtotal': float(info.get('subtotal', 0))
+                })
 
-                messagebox.showinfo("Éxito", f"Venta #{venta_id} registrada correctamente.")
-                
-                # 4. Limpiar todo para la siguiente venta
-                self.carrito.clear()
-                self._refrescar_vista_carrito()
-                self.actualizar_total_interfaz()
-                self.entry_referencia.delete(0, tk.END) # Limpiar referencia de la principal
-                
-                ventana_cobro.destroy() # Cerrar ventana de cobro
-                self.entry_buscar.focus() # Listos para el siguiente producto
-            else:
-                messagebox.showerror("Error", "No se pudo guardar la venta en la base de datos.")
+            vendedor_id = self.current_user[0] if self.current_user else 1
+            cliente_id = self.current_client[0] if self.current_client else None
+
+            # 4. Crear la cabecera de la venta
+            venta_id = self.db.crear_venta(datos_db, vendedor_id, cliente_id, self.tasa)
+
+            if not venta_id:
+                messagebox.showerror("Error", "No se pudo guardar la venta en la base de datos (cabecera).")
+                return
+
+            # 5. Insertar el detalle y ajustar stock
+            for item in carrito_items:
+                ok = self.db.insertar_detalle_venta(venta_id, item['id'], item['cantidad'], item['precio_unitario'], item['subtotal'])
+                if not ok:
+                    # Registrar el fallo pero no interrumpir el loop de limpieza
+                    print(f"Aviso: no se pudo insertar detalle para producto {item['id']}")
+                # intentar restar stock (usa la clave que manejes en la tabla productos)
+                try:
+                    self.db.restar_stock(item['id'], item['cantidad'])
+                except Exception:
+                    pass
+
+            messagebox.showinfo("Éxito", f"Venta #{venta_id} registrada correctamente.")
+
+            # 6. Limpiar la venta actual
+            self.carrito.clear()
+            self._refrescar_vista_carrito()
+            self.actualizar_total_interfaz()
+            try:
+                self.entry_referencia.delete(0, tk.END)
+            except Exception:
+                pass
+            try:
+                ventana_cobro.destroy()
+            except Exception:
+                pass
+            self.entry_buscar.focus()
 
         except Exception as e:
             messagebox.showerror("Error Crítico", f"Ocurrió un error al procesar: {e}")
 
-    def registrar_final():
-            # 1. Calculamos los totales de los campos de la ventana
-            monto_punto_bio = float(var_punto.get() or 0) + float(var_biopago.get() or 0)
-            monto_transf_pm = sum(float(b["monto"].get() or 0) for b in self.lista_bancos)
-            
-            # 2. Obtenemos el total real del carrito (el que calculamos al abrir la ventana)
-            # Asegúrate de usar la variable correcta de tu clase, ej: self.total_actual_usd
-            total_de_la_venta = total_usd 
-
-            # 3. Unificamos las referencias
-            todas_las_refs = ", ".join([f"{b['tipo'].get()}: {b['ref'].get()}" for b in self.lista_bancos if b['ref'].get()])
-
-            # 4. PASAMOS EL DICCIONARIO COMPLETO (Aquí es donde faltaba 'total_usd')
-            datos_para_db = {
-                "total_usd": total_usd,  # <--- ESTA ES LA LÍNEA MÁGICA
-                "usd": var_usd.get(),
-                "bs_e": var_bs_efec.get(),
-                "bs_p": str(monto_punto_bio),
-                "bs_t": str(monto_transf_pm),
-                "ref": todas_las_refs
-            }
-
-            self.confirmar_registro_completo(vent_pago, datos_para_db)
+    
 
     def finalizar_venta(self):
         total_usd = self.actualizar_total_interfaz() 
@@ -1400,65 +1387,7 @@ class MyMPos(ctk.CTk):
         btn_print.pack(pady=20, padx=30, fill="x")
 
         
-    def imprimir_ticket_cierre(self, datos, total_general, ventana_padre):
-        from reportlab.pdfgen import canvas
-        import os
-
-        # Obtener nombre del cajero actual
-        nombre_cajero = self.current_user[1] if self.current_user else "Luis"
-        fecha_cierre = datetime.now().strftime("%d/%m/%Y %H:%M")
-        fecha_archivo = datetime.now().strftime("%d-%m-%Y_%H-%M")
-        filename = f"cierre_{nombre_cajero}_{fecha_archivo}.pdf"
-        
-        try:
-            c = canvas.Canvas(filename, pagesize=(226, 450))
-            width, height = 226, 450
-            
-            # Encabezado
-            c.setFont("Helvetica-Bold", 12)
-            c.drawCentredString(width/2, height - 30, "CORTE DE CAJA")
-            c.setFont("Helvetica-Bold", 10)
-            c.drawCentredString(width/2, height - 45, f"CAJERO: {nombre_cajero}")
-            c.setFont("Helvetica", 9)
-            c.drawCentredString(width/2, height - 58, f"FECHA: {fecha_cierre}")
-            c.line(10, height - 65, width - 10, height - 65)
-
-            # Detalle por método
-            y = height - 85
-            c.setFont("Helvetica-Bold", 9)
-            c.drawString(15, y, "MÉTODO (CANT)")
-            c.drawRightString(width - 15, y, "MONTO USD")
-            y -= 15
-            
-            c.setFont("Helvetica", 9)
-            # datos suele venir como [(metodo, monto, cantidad), ...]
-            for metodo, monto, cant in datos:
-                nombre_metodo = str(metodo).replace('_', ' ').upper()
-                c.drawString(15, y, f"{nombre_metodo} ({cant})")
-                c.drawRightString(width - 15, y, f"$ {float(monto):,.2f}")
-                y -= 18
-
-            # Total Final
-            y -= 10
-            c.line(10, y, width - 10, y)
-            y -= 20
-            c.setFont("Helvetica-Bold", 11)
-            c.drawString(15, y, "TOTAL GENERAL:")
-            c.drawRightString(width - 15, y, f"$ {total_general:,.2f}")
-            
-            # Espacio para firma
-            y -= 60
-            c.line(40, y, width - 40, y)
-            c.setFont("Helvetica", 8)
-            c.drawCentredString(width/2, y - 10, "Firma de Auditoría")
-
-            c.save()
-            os.startfile(filename)
-            if ventana_padre: ventana_padre.destroy()
-            messagebox.showinfo("Éxito", "Ticket de cierre generado.")
-            
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo crear el ticket: {e}")
+    
 
     def imprimir_ticket_cierre(self, datos, total_general, ventana_padre):
         from reportlab.pdfgen import canvas
