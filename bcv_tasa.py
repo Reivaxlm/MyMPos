@@ -13,7 +13,7 @@ def obtener_tasa_bcv():
 
     # 1) Intento con API pública
     try:
-        resp = requests.get(url_api, timeout=4)
+        resp = requests.get(url_api, timeout=2)
         resp.raise_for_status()
         data = resp.json()
         tasa = float(data.get('promedio'))
@@ -24,7 +24,7 @@ def obtener_tasa_bcv():
 
     # 2) Intento scraping BCV como fallback
     try:
-        resp = requests.get(url_bcv, headers=headers, timeout=8)
+        resp = requests.get(url_bcv, headers=headers, timeout=2)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, 'html.parser')
         nodo = soup.find('div', id='dolar')

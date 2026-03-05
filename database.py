@@ -6,11 +6,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-
 class Database:
     def __init__(self):
-        # Leer configuración desde variables de entorno (seguro para despliegue)
-        # Proveer valores por defecto solo para entornos locales de desarrollo.
+        # Leer configuración desde variables de entorno
         self.config = {
             "host": os.getenv("DB_HOST", "aws-1-us-east-1.pooler.supabase.com"),
             "port": os.getenv("DB_PORT", "6543"),
@@ -20,7 +18,6 @@ class Database:
         }
 
     @contextmanager
-    
     def get_cursor(self):
         """Maneja la apertura y cierre automático de conexiones"""
         conn = psycopg2.connect(**self.config)
@@ -53,7 +50,6 @@ class Database:
             print(f"Error en búsqueda: {e}")
             return None
 
-    # --- NUEVA FUNCIÓN PARA EL VALERY ---
     def obtener_tasa_guardada(self):
         """Recupera la última tasa guardada para evitar errores sin internet"""
         try:
@@ -65,9 +61,7 @@ class Database:
             print(f"Error obtener_tasa_guardada: {e}")
             return 1.0
 
-    # Métodos CRUD básicos usados por la interfaz
     def registrar_producto(self, datos):
-        """datos = (codigo_barras, nombre, precio_compra, precio_venta, stock, stock_minimo, categoria)"""
         try:
             with self.get_cursor() as cur:
                 query = ("INSERT INTO productos (codigo_barras, nombre, precio_compra, precio_venta, stock, stock_minimo, categoria)"
@@ -79,7 +73,6 @@ class Database:
             return False
 
     def actualizar_producto(self, datos):
-        """datos = (nombre, precio_compra, precio_venta, stock, stock_minimo, categoria, codigo_barras)"""
         try:
             with self.get_cursor() as cur:
                 query = ("UPDATE productos SET nombre=%s, precio_compra=%s, precio_venta=%s, stock=%s, stock_minimo=%s, categoria=%s"
@@ -109,7 +102,6 @@ class Database:
             return []
 
     def buscar_productos_por_texto(self, texto, limit=12):
-        """Busca productos por nombre o código usando ILIKE y limita resultados para rapidez."""
         try:
             with self.get_cursor() as cur:
                 patron = f"%{texto}%"
@@ -121,11 +113,18 @@ class Database:
         except Exception as e:
             print(f"Error buscar_productos_por_texto: {e}")
             return []
+        
+    def buscar_producto_precios(self, criterio):
+        query = "SELECT id, codigo_barras, nombre, precio_compra, precio_venta, stock FROM productos WHERE codigo_barras = %s OR nombre ILIKE %s LIMIT 1"
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(query, (criterio, f"%{criterio}%"))
+                return cur.fetchall() # Retorna lista para mantener compatibilidad
+        except Exception as e:
+            print(f"Error: {e}")
+            return []
 
     def obtener_productos_bajo_stock(self):
-        """Devuelve lista de productos cuyo stock es menor o igual a stock_minimo.
-        Retorna filas completas de la tabla productos.
-        """
         try:
             with self.get_cursor() as cur:
                 cur.execute("SELECT id, codigo_barras, nombre, stock, stock_minimo FROM productos WHERE stock <= stock_minimo ORDER BY nombre")
@@ -153,56 +152,29 @@ class Database:
             return None
 
     def crear_venta(self, datos_pago, vendedor_id, cliente_id, tasa):
-        """
-        Inserta la cabecera de la venta y devuelve el id generado.
-        El detalle de la venta debe insertarlo quien llama (atomicidad manejada por get_cursor).
-        """
         def _to_float(val):
-            if val is None:
-                return 0.0
-            if isinstance(val, (int, float)):
-                return float(val)
+            if val is None: return 0.0
+            if isinstance(val, (int, float)): return float(val)
             s = str(val).strip()
-            if s == "":
-                return 0.0
+            if s == "": return 0.0
             s = s.replace(' ', '').replace('$', '').replace('US$', '').replace('Bs.', '').replace('Bs', '')
             if ',' in s and '.' in s:
-                if s.rfind(',') > s.rfind('.'):
-                    s = s.replace('.', '').replace(',', '.')
-                else:
-                    s = s.replace(',', '')
+                s = s.replace('.', '').replace(',', '.') if s.rfind(',') > s.rfind('.') else s.replace(',', '')
             elif ',' in s:
                 s = s.replace('.', '').replace(',', '.')
             s = re.sub(r'[^0-9\.\-]', '', s)
-            try:
-                return float(s)
-            except Exception:
-                return 0.0
+            try: return float(s)
+            except: return 0.0
 
         try:
             with self.get_cursor() as cur:
-                # Ajustamos la inserción a las columnas reales de la tabla 'ventas' (total y metodo_pago)
                 total = _to_float(datos_pago.get('total_usd', datos_pago.get('total', 0)))
                 metodo = datos_pago.get('metodo') or 'mixto'
-
                 query_venta = """
-                    INSERT INTO ventas (
-                        vendedor_id,
-                        cliente_id,
-                        total,
-                        metodo_pago,
-                        fecha
-                    ) VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    RETURNING id
+                    INSERT INTO ventas (vendedor_id, cliente_id, total, metodo_pago, fecha) 
+                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING id
                 """
-
-                cur.execute(query_venta, (
-                    vendedor_id,
-                    cliente_id,
-                    total,
-                    metodo
-                ))
-
+                cur.execute(query_venta, (vendedor_id, cliente_id, total, metodo))
                 row = cur.fetchone()
                 return row[0] if row else None
         except Exception as e:
@@ -213,10 +185,9 @@ class Database:
         try:
             with self.get_cursor() as cur:
                 cur.execute("""
-                    SELECT 
-                        v.id, v.fecha, v.total, v.metodo_pago, v.vendedor_id, v.referencia,
-                        c.nombre as cliente_nombre, c.cedula as cliente_cedula,
-                        u.nombre as vendedor_nombre
+                    SELECT v.id, v.fecha, v.total, v.metodo_pago, v.vendedor_id, v.referencia,
+                           c.nombre as cliente_nombre, c.cedula as cliente_cedula,
+                           u.nombre as vendedor_nombre
                     FROM public.ventas v
                     LEFT JOIN public.clientes c ON v.cliente_id = c.id
                     LEFT JOIN public.usuarios u ON v.vendedor_id::text = u.id::text
@@ -226,7 +197,7 @@ class Database:
         except Exception as e:
             print(f"Error al obtener venta: {e}")
             return None
-        
+
     def obtener_items_venta(self, venta_id):
         try:
             with self.get_cursor() as cur:
@@ -246,7 +217,6 @@ class Database:
             return None
 
     def insertar_detalle_venta(self, venta_id, producto_id, cantidad, precio_unitario, subtotal):
-        """Inserta una fila en `detalle_ventas`. `producto_id` puede ser el id entero o código según tu esquema."""
         try:
             with self.get_cursor() as cur:
                 cur.execute(
@@ -258,9 +228,7 @@ class Database:
             print(f"Error insertar_detalle_venta: {e}")
             return False
 
-    # --- Usuarios y Clientes ---
     def authenticate_user(self, username, password_hash):
-        """Retorna fila de usuario si las credenciales coinciden (password ya hasheado)."""
         try:
             with self.get_cursor() as cur:
                 cur.execute("SELECT id, username, nombre, rol FROM usuarios WHERE username = %s AND password_hash = %s", (username, password_hash))
@@ -270,10 +238,8 @@ class Database:
             return None
 
     def crear_cliente(self, datos):
-        """datos = (nombre, cedula, telefono) -> retorna id o None"""
         try:
             with self.get_cursor() as cur:
-                # Usamos RETURNING id para obtener el ID generado inmediatamente
                 cur.execute("INSERT INTO clientes (nombre, cedula, telefono) VALUES (%s, %s, %s) RETURNING id", datos)
                 row = cur.fetchone()
                 return row[0] if row else None
@@ -282,31 +248,18 @@ class Database:
             return None
 
     def buscar_cliente(self, criterio):
-        """Busca por ID exacto, Nombre parcial o Cédula parcial."""
         try:
             with self.get_cursor() as cur:
-                # Si el buscador está vacío, traemos los últimos 50 clientes registrados
                 if not criterio:
                     cur.execute("SELECT id, nombre, cedula, telefono FROM clientes ORDER BY id DESC LIMIT 50")
                     return cur.fetchall()
-
-                # Definimos el patrón de búsqueda para ILIKE
                 patron = f"%{criterio}%"
-                
-                # Intentamos ver si el criterio es un ID numérico exacto
-                id_busqueda = None
-                if criterio.isdigit():
-                    id_busqueda = int(criterio)
-
-                # Ejecutamos una sola consulta que busque en todos los campos importantes
+                id_busqueda = int(criterio) if criterio.isdigit() else None
                 cur.execute("""
-                    SELECT id, nombre, cedula, telefono 
-                    FROM clientes 
+                    SELECT id, nombre, cedula, telefono FROM clientes 
                     WHERE id = %s OR nombre ILIKE %s OR cedula ILIKE %s 
-                    ORDER BY nombre ASC 
-                    LIMIT 20
+                    ORDER BY nombre ASC LIMIT 20
                 """, (id_busqueda, patron, patron))
-                
                 return cur.fetchall()
         except Exception as e:
             print(f"Error buscar_cliente: {e}")
@@ -320,33 +273,27 @@ class Database:
         except Exception as e:
             print(f"Error get_cliente_por_id: {e}")
             return None
-        
+
     def obtener_detalle_ventas_por_fecha(self, fecha):
-        """Retorna todas las ventas de un día específico con sus detalles."""
         try:
             with self.get_cursor() as cur:
-                # Traemos: ID, Hora, Total, Método, Referencia y Vendedor
                 cur.execute("""
                     SELECT v.id, v.fecha::time, v.total, v.metodo_pago, v.referencia, u.username
                     FROM ventas v
                     LEFT JOIN usuarios u ON v.vendedor_id = u.id
-                    WHERE v.fecha::date = %s
-                    ORDER BY v.id DESC
+                    WHERE v.fecha::date = %s ORDER BY v.id DESC
                 """, (fecha,))
                 return cur.fetchall()
         except Exception as e:
             print(f"Error en reporte detallado: {e}")
             return []
-    
+
     def obtener_resumen_diario(self):
         try:
             with self.get_cursor() as cur:
-                # Cambia "ventas" por "venta" si ese es el nombre de tu tabla
                 cur.execute("""
                     SELECT metodo_pago, SUM(total) as total_ventas, COUNT(id) as num_operaciones
-                    FROM ventas
-                    WHERE fecha::date = CURRENT_DATE
-                    GROUP BY metodo_pago
+                    FROM ventas WHERE fecha::date = CURRENT_DATE GROUP BY metodo_pago
                 """)
                 return cur.fetchall()
         except Exception as e:
@@ -357,96 +304,77 @@ class Database:
         try:
             with self.get_cursor() as cur:
                 cur.execute("""
-                    SELECT 
-                        v.id,
-                        v.fecha::time,
-                        v.total,
-                        v.metodo_pago,
-                        u.nombre as cajero,
-                        c.nombre as cliente
+                    SELECT v.id, v.fecha::time, v.total, v.metodo_pago, u.nombre as cajero, c.nombre as cliente
                     FROM public.ventas v
                     LEFT JOIN public.clientes c ON v.cliente_id = c.id
-                    -- AGREGAMOS ::text en ambos lados para que la comparación sea válida
                     LEFT JOIN public.usuarios u ON v.vendedor_id::text = u.id::text
-                    WHERE v.fecha::date = %s 
-                    ORDER BY v.id DESC
+                    WHERE v.fecha::date = %s ORDER BY v.id DESC
                 """, (fecha,))
                 return cur.fetchall()
         except Exception as e:
             print(f"Error auditoria con cajero: {e}")
             return []
-        
+
     def obtener_resumen_por_fecha(self, fecha):
-        """Calcula el resumen de ventas para una fecha específica."""
         try:
             with self.get_cursor() as cur:
                 cur.execute("""
                     SELECT metodo_pago, SUM(total) as total_ventas, COUNT(id) as num_operaciones
-                    FROM ventas
-                    WHERE fecha::date = %s
-                    GROUP BY metodo_pago
+                    FROM ventas WHERE fecha::date = %s GROUP BY metodo_pago
                 """, (fecha,))
                 return cur.fetchall()
         except Exception as e:
             print(f"Error resumen por fecha: {e}")
             return []
-    
+
     def obtener_cierre_cajero(self, usuario_id, fecha=None):
         if not fecha:
             from datetime import date
             fecha = date.today()
-            
         try:
             with self.get_cursor() as cur:
                 cur.execute("""
-                    SELECT 
-                        metodo_pago, 
-                        SUM(total) as monto, 
-                        COUNT(id) as cantidad
-                    FROM public.ventas
-                    WHERE vendedor_id::text = %s AND fecha::date = %s
+                    SELECT metodo_pago, SUM(total) as monto, COUNT(id) as cantidad
+                    FROM public.ventas WHERE vendedor_id::text = %s AND fecha::date = %s
                     GROUP BY metodo_pago
                 """, (str(usuario_id), fecha))
                 return cur.fetchall()
         except Exception as e:
             print(f"Error calculando cierre: {e}")
             return []
-        
+
     def registrar_nuevo_usuario(self, username, nombre, password_hash, rol):
-        """Registra un empleado en la tabla usuarios. Retorna True si tiene éxito."""
         try:
             with self.get_cursor() as cur:
-                query = """
-                    INSERT INTO usuarios (username, nombre, password_hash, rol) 
-                    VALUES (%s, %s, %s, %s)
-                """
+                query = "INSERT INTO usuarios (username, nombre, password_hash, rol) VALUES (%s, %s, %s, %s)"
                 cur.execute(query, (username, nombre, password_hash, rol))
-                
-                # --- LA SOLUCIÓN AQUÍ ---
-                # Accedemos a la conexión directamente desde el cursor
-                cur.connection.commit() 
                 return True
         except Exception as e:
             print(f"Error al registrar usuario: {e}")
-            # Si algo falla, intentamos hacer rollback desde el cursor si es posible
-            try:
-                cur.connection.rollback()
-            except:
-                pass
             return False
+
     def consultar_producto_rapido(self, busqueda):
-        """Retorna productos que coincidan con el nombre o código."""
-        query = """
-            SELECT nombre, precio_venta, stock 
-            FROM productos 
-            WHERE nombre ILIKE %s OR codigo_barras = %s
-        """
+        query = "SELECT nombre, precio_venta, stock FROM productos WHERE nombre ILIKE %s OR codigo_barras = %s"
         try:
             with self.get_cursor() as cur:
-                # El %s con % al rededor permite buscar coincidencias parciales
                 cur.execute(query, (f"%{busqueda}%", busqueda))
                 return cur.fetchall()
         except Exception as e:
             print(f"Error en consulta rápida: {e}")
             return []
+
+    def registrar_item_venta(self, venta_id, producto_nombre, cantidad, precio_unitario):
+        query_item = """
+            INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario)
+            VALUES (%s, (SELECT id FROM productos WHERE nombre = %s LIMIT 1), %s, %s)
+        """
+        query_stock = "UPDATE productos SET stock = stock - %s WHERE nombre = %s"
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(query_item, (venta_id, producto_nombre, cantidad, precio_unitario))
+                cur.execute(query_stock, (cantidad, producto_nombre))
+                return True
+        except Exception as e:
+            print(f"Error al registrar detalle: {e}")
+            return False
 # .\.venv\Scripts\activate.bat
