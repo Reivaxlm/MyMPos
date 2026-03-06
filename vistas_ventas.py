@@ -3,6 +3,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from modulo_factura import generar_factura_pdf
 from modulo_clientes import BuscarClienteDialog
+from utilidades import parse_monto
 
 class VentasFrame(ctk.CTkFrame):
     def __init__(self, master, app):
@@ -119,34 +120,163 @@ class VentasFrame(ctk.CTkFrame):
         self.app.carrito = {}
         self.actualizar_tabla()
 
+    def agregar_referencia_ui(self, container):
+        # Cada vez que llamen a esta función, creamos una nueva fila
+        frame_pago = ctk.CTkFrame(container, fg_color="transparent")
+        frame_pago.pack(fill="x", pady=5)
+        
+        # Combo para tipo de pago
+        tipo = ctk.CTkComboBox(frame_pago, values=["Pago Móvil", "Transferencia", "Biopago", "Efectivo"], width=120)
+        tipo.pack(side="left", padx=5)
+        
+        # Campo de monto
+        monto = ctk.CTkEntry(frame_pago, placeholder_text="Monto Bs", width=100)
+        monto.pack(side="left", padx=5)
+        
+        # Campo de referencia
+        ref = ctk.CTkEntry(frame_pago, placeholder_text="Ref", width=80)
+        ref.pack(side="left", padx=5)
+        
+        return {"tipo": tipo, "monto": monto, "ref": ref}
+        
+
     def cobrar(self):
+        # 1. Validaciones y Cliente
         if not self.app.carrito:
             messagebox.showwarning("Atención", "El carrito está vacío")
             return
 
-        # Diálogo de cliente (modulo_clientes.py)
         dlg = BuscarClienteDialog(self, self.app.db)
         self.wait_window(dlg)
+        if not dlg.result: return 
+        cliente = dlg.result
         
-        if dlg.result:
-            cliente = dlg.result # (id, nombre, cedula...)
-            total_usd = sum(d['precio'] * d['cant'] for d in self.app.carrito.values())
+        total_usd = sum(d['precio'] * d['cant'] for d in self.app.carrito.values())
+        total_bs = total_usd * self.app.tasa
+
+        # 2. Ventana de Cobro
+        vent_pago = ctk.CTkToplevel(self)
+        vent_pago.title("Cobro")
+        vent_pago.geometry("450x650")
+        vent_pago.grab_set()
+
+        ctk.CTkLabel(vent_pago, text=f"TOTAL: {total_bs:.2f} Bs", font=("Arial", 16, "bold")).pack(pady=10)
+        
+        # LABEL DINÁMICO (Falta/Vuelto)
+        lbl_estado = ctk.CTkLabel(vent_pago, text=f"Falta: {total_bs:.2f} Bs", font=("Arial", 22, "bold"), text_color="#FF5252")
+        lbl_estado.pack(pady=10)
+
+        # Entradas Fijas
+        entradas = {
+            'efectivo_usd': ctk.CTkEntry(vent_pago, placeholder_text="Efectivo ($)"),
+            'efectivo_bs': ctk.CTkEntry(vent_pago, placeholder_text="Efectivo (Bs)"),
+            'bio': ctk.CTkEntry(vent_pago, placeholder_text="Biopago (Bs)"),
+            'punto': ctk.CTkEntry(vent_pago, placeholder_text="Punto (Bs)")
+        }
+        for entry in entradas.values(): entry.pack(pady=2, padx=20, fill="x")
+
+        # Lista dinámica
+        self.lista_dinamica = []
+        scroll = ctk.CTkScrollableFrame(vent_pago, height=150)
+        scroll.pack(fill="both", expand=True, padx=20, pady=10)
+
+        def actualizar_calculadora(*args):
+            # Sumar todos los ingresos convertidos a Bs
+            m_usd = parse_monto(entradas['efectivo_usd'].get()) * self.app.tasa
+            m_bs = parse_monto(entradas['efectivo_bs'].get())
+            m_bio = parse_monto(entradas['bio'].get())
+            m_punto = parse_monto(entradas['punto'].get())
+            m_dinamicos = sum(parse_monto(p['monto'].get()) for p in self.lista_dinamica)
             
-            # 1. Crear Venta en DB
-            datos_pago = {'total_usd': total_usd, 'metodo': 'EFECTIVO'}
-            id_v = self.app.db.crear_venta(datos_pago, self.app.usuario_actual[0], cliente[0], self.app.tasa)
-            
-            if id_v:
-                # 2. Registrar cada producto
-                for nom, d in self.app.carrito.items():
-                    self.app.db.registrar_item_venta(id_v, nom, d['cant'], d['precio'])
+            total_ingresado = m_usd + m_bs + m_bio + m_punto + m_dinamicos
+            diferencia = total_bs - total_ingresado
+
+            # Lógica: Si falta dinero -> Rojo. Si sobra -> Verde (Vuelto)
+            if diferencia > 0:
+                lbl_estado.configure(text=f"Falta: {diferencia:.2f} Bs", text_color="#FF5252")
+            else:
+                lbl_estado.configure(text=f"Vuelto: {abs(diferencia):.2f} Bs", text_color="#00E676")
+
+        for e in entradas.values(): e.bind("<KeyRelease>", actualizar_calculadora)
+
+        def agregar_fila(metodo):
+            f = ctk.CTkFrame(scroll, fg_color="#333333")
+            f.pack(fill="x", pady=2)
+            ctk.CTkLabel(f, text=metodo, width=80).pack(side="left", padx=5)
+            monto = ctk.CTkEntry(f, placeholder_text="Bs", width=80)
+            monto.bind("<KeyRelease>", actualizar_calculadora)
+            monto.pack(side="left", padx=5)
+            ref = ctk.CTkEntry(f, placeholder_text="Ref", width=80)
+            ref.pack(side="left", padx=5)
+            self.lista_dinamica.append({'tipo': metodo, 'monto': monto, 'ref': ref})
+
+        ctk.CTkButton(vent_pago, text="➕ Agregar PM o Transf", command=lambda: agregar_fila("Pago Móvil")).pack(pady=5)
+
+        def finalizar():
+            try:
+                m_usd = parse_monto(entradas['efectivo_usd'].get()) * self.app.tasa
+                m_bs = parse_monto(entradas['efectivo_bs'].get())
+                m_bio = parse_monto(entradas['bio'].get())
+                m_punto = parse_monto(entradas['punto'].get())
                 
-                # 3. Generar Factura PDF
-                generar_factura_pdf(
-                    id_v, cliente[1], cliente[2], 
-                    self.app.carrito, total_usd, 
-                    total_usd * self.app.tasa, self.app.tasa, "EFECTIVO"
-                )
+                detalles_list = [f"Efectivo $: {entradas['efectivo_usd'].get()}", f"Efectivo Bs: {entradas['efectivo_bs'].get()}", f"Bio: {entradas['bio'].get()}", f"Punto: {entradas['punto'].get()}"]
+                total_p = m_usd + m_bs + m_bio + m_punto
                 
-                messagebox.showinfo("Éxito", f"Venta #{id_v} procesada correctamente")
-                self.vaciar_carrito()
+                for p in self.lista_dinamica:
+                    m = parse_monto(p['monto'].get())
+                    r = p['ref'].get().strip()
+                    if m > 0:
+                        if not r:
+                            messagebox.showerror("Error", f"Falta referencia en {p['tipo']}")
+                            return
+                        total_p += m
+                        detalles_list.append(f"{p['tipo']}: {m}Bs (Ref: {r})")
+
+                if total_p < (total_bs - 0.01):
+                    messagebox.showerror("Error", "Monto insuficiente")
+                    return
+
+                metodo_detalle = " | ".join(detalles_list)
+                datos_v = {'total_usd': total_usd, 'metodo': metodo_detalle}
+                
+                # GUARDADO CON EL ID DEL CLIENTE SELECCIONADO
+                id_v = self.app.db.crear_venta(datos_v, self.app.usuario_actual[0], cliente[0], self.app.tasa)
+                
+                if id_v:
+                    for nom, d in self.app.carrito.items():
+                        # 1. Registro del ítem
+                        self.app.db.registrar_item_venta(id_v, nom, d['cant'], d['precio'], float(d['precio'])*int(d['cant']))
+                        
+                        # 2. Descuento de stock con validación de consola
+                        print(f"DEBUG: Intentando descontar {d['cant']} de producto '{nom}'")
+                        # Debes obtener el código del producto desde 'd' (si tu carrito guarda el código)
+                        resultado = self.app.db.descontar_stock(nom, d['cant'])
+                        
+                        if resultado is False: # O el valor que retorne tu función cuando falla
+                            messagebox.showerror("Error", f"No se pudo descontar el stock de {nom}")
+                            return
+                    
+                    generar_factura_pdf(
+                        id_v, 
+                        cliente[1], 
+                        cliente[2], 
+                        self.app.carrito, 
+                        total_usd, 
+                        total_bs, 
+                        self.app.tasa, 
+                        metodo_detalle
+                    )
+                    messagebox.showinfo("Éxito", "Venta registrada")
+                    vent_pago.destroy()
+                    self.vaciar_carrito()
+            except Exception as e:
+                messagebox.showerror("Error", f"Error: {e}")
+
+        ctk.CTkButton(vent_pago, text="CONFIRMAR COBRO", fg_color="green", command=finalizar).pack(pady=20)
+        self.lista_pagos = []
+
+def sumar_pagos(self):
+    total = 0
+    for p in self.lista_pagos:
+        total += parse_monto(p["monto"].get())
+    return total

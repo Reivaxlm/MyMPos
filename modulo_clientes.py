@@ -22,11 +22,21 @@ class BuscarClienteDialog(ctk.CTkToplevel):
         btn_f.pack(fill="x", pady=10)
         ctk.CTkButton(btn_f, text="Seleccionar", command=self._seleccionar).pack(side="left", padx=20)
         ctk.CTkButton(btn_f, text="Nuevo", command=self._nuevo_cliente).pack(side="right", padx=20)
+        self.after(100, self._buscar) 
 
     def _buscar(self, event=None):
-        for i in self.tree.get_children(): self.tree.delete(i)
+        # Limpia la tabla
+        for i in self.tree.get_children(): 
+            self.tree.delete(i)
+        
+        # Obtiene clientes (si el campo está vacío, tu función debería traer todos)
+        # Si al no escribir nada no trae nada, asegúrate de que self.db.buscar_cliente 
+        # tenga una condición que diga: if not termino: return todos_los_clientes
         clientes = self.db.buscar_cliente(self.entry_buscar.get())
-        for c in clientes: self.tree.insert("", "end", values=(c[0], c[1], c[2]))
+        
+        # Inserta en la tabla
+        for c in clientes: 
+            self.tree.insert("", "end", values=(c[0], c[1], c[2]))
 
     def _seleccionar(self):
         sel = self.tree.focus()

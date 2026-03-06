@@ -133,13 +133,16 @@ class Database:
             print(f"Error obtener_productos_bajo_stock: {e}")
             return []
 
-    def restar_stock(self, codigo, cantidad):
+    def descontar_stock(self, nombre_producto, cantidad):
         try:
+            # Usamos el gestor de contexto que ya creaste
             with self.get_cursor() as cur:
-                cur.execute("UPDATE productos SET stock = stock - %s WHERE codigo_barras = %s", (cantidad, codigo))
-                return cur.rowcount > 0
+                query = "UPDATE productos SET stock = stock - %s WHERE nombre = %s"
+                cur.execute(query, (cantidad, nombre_producto))
+                # No necesitas hacer commit aquí, tu get_cursor ya lo hace al salir del 'with'
+                return True
         except Exception as e:
-            print(f"Error restar_stock: {e}")
+            print(f"Error al descontar stock: {e}")
             return False
 
     def get_producto_por_codigo(self, codigo):
@@ -363,15 +366,15 @@ class Database:
             print(f"Error en consulta rápida: {e}")
             return []
 
-    def registrar_item_venta(self, venta_id, producto_nombre, cantidad, precio_unitario):
+    def registrar_item_venta(self, venta_id, producto_nombre, cantidad, precio_unitario, subtotal):
         query_item = """
-            INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario)
-            VALUES (%s, (SELECT id FROM productos WHERE nombre = %s LIMIT 1), %s, %s)
+            INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario, subtotal)
+            VALUES (%s, (SELECT id FROM productos WHERE nombre = %s LIMIT 1), %s, %s, %s)
         """
         query_stock = "UPDATE productos SET stock = stock - %s WHERE nombre = %s"
         try:
             with self.get_cursor() as cur:
-                cur.execute(query_item, (venta_id, producto_nombre, cantidad, precio_unitario))
+                cur.execute(query_item, (venta_id, producto_nombre, cantidad, precio_unitario, subtotal))
                 cur.execute(query_stock, (cantidad, producto_nombre))
                 return True
         except Exception as e:
