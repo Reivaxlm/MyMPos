@@ -1,3 +1,5 @@
+from tkinter import messagebox
+
 import customtkinter as ctk
 from database import Database
 from bcv_tasa import obtener_tasa_bcv
@@ -113,6 +115,14 @@ class MyMPos(ctk.CTk):
             anchor="center" # Centra todo el contenido
         )
         return btn
+    
+    def boton_cierre_caja(self):
+        from modulo_cierre import realizar_cierre
+        try:
+            pdf = realizar_cierre()
+            messagebox.showinfo("Cierre", f"Cierre generado con éxito: {pdf}")
+        except Exception as e:
+            messagebox.showerror("Error", f"No se pudo cerrar la caja: {e}")
 
 def crear_contenedor_vista(self, titulo):
     # Esto crea un header estilizado para cada sección

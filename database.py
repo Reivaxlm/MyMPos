@@ -230,6 +230,23 @@ class Database:
         except Exception as e:
             print(f"Error insertar_detalle_venta: {e}")
             return False
+        
+    # Agrega este método a tu clase Database en database.py
+    def obtener_totales_cierre_hoy(self):
+        """Consulta los totales de venta agrupados por método de pago para hoy"""
+        query = """
+            SELECT metodo_pago, SUM(total) as total_ventas
+            FROM ventas 
+            WHERE fecha::date = CURRENT_DATE 
+            GROUP BY metodo_pago
+        """
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(query)
+                return cur.fetchall() # Esto devuelve una lista de tuplas [(metodo, total), ...]
+        except Exception as e:
+            print(f"Error en cierre: {e}")
+            return []
 
     def authenticate_user(self, username, password_hash):
         try:
@@ -291,44 +308,27 @@ class Database:
             print(f"Error en reporte detallado: {e}")
             return []
 
-    def obtener_resumen_diario(self):
-        try:
-            with self.get_cursor() as cur:
-                cur.execute("""
-                    SELECT metodo_pago, SUM(total) as total_ventas, COUNT(id) as num_operaciones
-                    FROM ventas WHERE fecha::date = CURRENT_DATE GROUP BY metodo_pago
-                """)
-                return cur.fetchall()
-        except Exception as e:
-            print(f"Error resumen: {e}")
-            return []
+        
+    def obtener_resumen_kpi(self, inicio, fin):
+        """Devuelve el total vendido y la cantidad de operaciones para las tarjetas"""
+        query = "SELECT SUM(total), COUNT(id) FROM public.ventas WHERE fecha::date BETWEEN %s AND %s"
+        with self.get_cursor() as cur:
+            cur.execute(query, (inicio, fin))
+            return cur.fetchone() # Retorna (total, cantidad)
 
-    def obtener_auditoria_diaria(self, fecha):
-        try:
-            with self.get_cursor() as cur:
-                cur.execute("""
-                    SELECT v.id, v.fecha::time, v.total, v.metodo_pago, u.nombre as cajero, c.nombre as cliente
-                    FROM public.ventas v
-                    LEFT JOIN public.clientes c ON v.cliente_id = c.id
-                    LEFT JOIN public.usuarios u ON v.vendedor_id::text = u.id::text
-                    WHERE v.fecha::date = %s ORDER BY v.id DESC
-                """, (fecha,))
-                return cur.fetchall()
-        except Exception as e:
-            print(f"Error auditoria con cajero: {e}")
-            return []
-
-    def obtener_resumen_por_fecha(self, fecha):
-        try:
-            with self.get_cursor() as cur:
-                cur.execute("""
-                    SELECT metodo_pago, SUM(total) as total_ventas, COUNT(id) as num_operaciones
-                    FROM ventas WHERE fecha::date = %s GROUP BY metodo_pago
-                """, (fecha,))
-                return cur.fetchall()
-        except Exception as e:
-            print(f"Error resumen por fecha: {e}")
-            return []
+    def obtener_top_productos(self, inicio, fin):
+        """Datos para la gráfica"""
+        query = """
+            SELECT p.nombre, SUM(dv.cantidad) as total 
+            FROM public.detalle_ventas dv
+            JOIN public.productos p ON dv.producto_id = p.id
+            JOIN public.ventas v ON dv.venta_id = v.id
+            WHERE v.fecha::date BETWEEN %s AND %s
+            GROUP BY p.nombre ORDER BY total DESC LIMIT 5
+        """
+        with self.get_cursor() as cur:
+            cur.execute(query, (inicio, fin))
+            return cur.fetchall()
 
     def obtener_cierre_cajero(self, usuario_id, fecha=None):
         if not fecha:
@@ -357,10 +357,20 @@ class Database:
             return False
 
     def consultar_producto_rapido(self, busqueda):
-        query = "SELECT nombre, precio_venta, stock FROM productos WHERE nombre ILIKE %s OR codigo_barras = %s"
+        # 1. Agregamos LIMIT 10 para no saturar la interfaz con 100 resultados
+        # 2. Priorizamos que empiece por el texto (más rápido con índices)
+        query = """
+            SELECT nombre, precio_venta, stock 
+            FROM productos 
+            WHERE nombre ILIKE %s 
+            OR codigo_barras = %s 
+            ORDER BY nombre ASC 
+            LIMIT 10
+        """
         try:
             with self.get_cursor() as cur:
-                cur.execute(query, (f"%{busqueda}%", busqueda))
+                # Usamos busqueda% (sin el primer %) para que sea ultra rápido
+                cur.execute(query, (f"{busqueda}%", busqueda))
                 return cur.fetchall()
         except Exception as e:
             print(f"Error en consulta rápida: {e}")

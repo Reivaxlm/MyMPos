@@ -6,3 +6,4 @@ lxml
 urllib3
 reportlab
 python-dotenv
+matplotlib

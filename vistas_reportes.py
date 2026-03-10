@@ -1,6 +1,8 @@
 import customtkinter as ctk
-from tkinter import ttk, messagebox
-from modulo_factura import generar_factura_pdf # Por si necesitas re-imprimir
+from tkinter import ttk
+from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 class ReportesFrame(ctk.CTkFrame):
     def __init__(self, master, app):
@@ -9,40 +11,44 @@ class ReportesFrame(ctk.CTkFrame):
         self.setup_ui()
 
     def setup_ui(self):
-        self.pack(fill="both", expand=True, padx=20, pady=10)
+        # Filtros
+        filtros = ctk.CTkFrame(self, fg_color="transparent")
+        filtros.pack(fill="x", pady=10)
+        for t, r in [("HOY", "HOY"), ("SEMANA", "SEMANA"), ("MES", "MES")]:
+            ctk.CTkButton(filtros, text=t, width=120, command=lambda r=r: self.cargar_dashboard(r)).pack(side="left", padx=5)
 
-        # SECCIÓN DE CIERRES
-        cierres_f = ctk.CTkLabel(self, text="CIERRES DE CAJA", font=("Arial", 20, "bold"))
-        cierres_f.pack(pady=10)
+        # KPIs (Tarjetas)
+        self.kpi_f = ctk.CTkFrame(self, fg_color="transparent")
+        self.kpi_f.pack(fill="x", pady=10)
+        self.lbl_total = ctk.CTkLabel(self.kpi_f, text="Venta: $0.00", font=("Arial", 20, "bold"))
+        self.lbl_total.pack(side="left", padx=20)
         
-        btn_f = ctk.CTkFrame(self, fg_color="transparent")
-        btn_f.pack(fill="x", pady=10)
+        # Gráfica
+        self.grafica_f = ctk.CTkFrame(self)
+        self.grafica_f.pack(fill="both", expand=True, pady=10)
+
+    def cargar_dashboard(self, rango):
+        # 1. Definir fechas
+        hoy = datetime.now()
+        if rango == "HOY": i = f = hoy.strftime("%Y-%m-%d")
+        elif rango == "SEMANA": i = (hoy - timedelta(days=7)).strftime("%Y-%m-%d"); f = hoy.strftime("%Y-%m-%d")
+        else: i = hoy.replace(day=1).strftime("%Y-%m-%d"); f = hoy.strftime("%Y-%m-%d")
+
+        # 2. Obtener datos
+        resumen = self.app.db.obtener_resumen_kpi(i, f)
+        productos = self.app.db.obtener_top_productos(i, f)
+
+        # 3. Actualizar UI
+        self.lbl_total.configure(text=f"Total Vendido: ${resumen[0] or 0:,.2f} | Operaciones: {resumen[1]}")
         
-        ctk.CTkButton(btn_f, text="GENERAR CORTE X", fg_color="#2979FF", 
-                      command=self.corte_x).pack(side="left", expand=True, padx=10)
-        ctk.CTkButton(btn_f, text="GENERAR CORTE Z (CIERRE)", fg_color="#FF1744", 
-                      command=self.corte_z).pack(side="left", expand=True, padx=10)
-
-        # TABLA DE VENTAS DEL DÍA
-        ctk.CTkLabel(self, text="HISTORIAL DE HOY", font=("Arial", 14)).pack(pady=5)
-        self.tree_v = ttk.Treeview(self, columns=("ID", "Hora", "Cliente", "Total", "Metodo"), show="headings")
-        for c in ("ID", "Hora", "Cliente", "Total", "Metodo"): self.tree_v.heading(c, text=c)
-        self.tree_v.pack(fill="both", expand=True, pady=10)
-        self.cargar_ventas_hoy()
-
-    def cargar_ventas_hoy(self):
-        for i in self.tree_v.get_children(): self.tree_v.delete(i)
-        # Tu mecanismo de consulta de ventas
-        ventas = self.app.db.obtener_ventas_hoy()
-        for v in ventas: self.tree_v.insert("", "end", values=v)
-
-    def corte_x(self):
-        # Tu lógica original de sumar totales sin cerrar la caja
-        resumen = self.app.db.obtener_resumen_diario()
-        messagebox.showinfo("Corte X", f"Total Ventas: {resumen['total']}$")
-
-    def corte_z(self):
-        # Tu lógica original de cerrar el turno en la base de datos
-        if messagebox.askyesno("Cierre Z", "¿Cerrar caja definitivamente?"):
-            self.app.db.cerrar_caja_diaria()
-            messagebox.showinfo("Cierre", "Caja Cerrada. Reporte generado.")
+        # 4. Dibujar Gráfica
+        for w in self.grafica_f.winfo_children(): w.destroy()
+        fig, ax = plt.subplots(figsize=(5, 2), dpi=100)
+        fig.patch.set_facecolor('#2b2b2b')
+        ax.set_facecolor('#2b2b2b')
+        ax.bar([p[0] for p in productos], [p[1] for p in productos], color='#2979FF')
+        ax.tick_params(colors='white')
+        
+        canvas = FigureCanvasTkAgg(fig, master=self.grafica_f)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True)
