@@ -310,25 +310,71 @@ class Database:
 
         
     def obtener_resumen_kpi(self, inicio, fin):
-        """Devuelve el total vendido y la cantidad de operaciones para las tarjetas"""
-        query = "SELECT SUM(total), COUNT(id) FROM public.ventas WHERE fecha::date BETWEEN %s AND %s"
-        with self.get_cursor() as cur:
-            cur.execute(query, (inicio, fin))
-            return cur.fetchone() # Retorna (total, cantidad)
+        """Total ventas y conteo para las tarjetas superiores"""
+        query = "SELECT SUM(total), COUNT(id) FROM ventas WHERE fecha::date BETWEEN %s AND %s"
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(query, (inicio, fin))
+                res = cur.fetchone()
+                return (res[0] if res[0] else 0.0, res[1] if res[1] else 0)
+        except: return (0.0, 0)
 
     def obtener_top_productos(self, inicio, fin):
-        """Datos para la gráfica"""
+        """Para la gráfica de barras"""
         query = """
             SELECT p.nombre, SUM(dv.cantidad) as total 
-            FROM public.detalle_ventas dv
-            JOIN public.productos p ON dv.producto_id = p.id
-            JOIN public.ventas v ON dv.venta_id = v.id
+            FROM detalle_ventas dv
+            JOIN productos p ON dv.producto_id = p.id
+            JOIN ventas v ON dv.venta_id = v.id
             WHERE v.fecha::date BETWEEN %s AND %s
             GROUP BY p.nombre ORDER BY total DESC LIMIT 5
         """
-        with self.get_cursor() as cur:
-            cur.execute(query, (inicio, fin))
-            return cur.fetchall()
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(query, (inicio, fin))
+                return cur.fetchall()
+        except: return []
+
+    def obtener_peor_producto(self, inicio, fin):
+        """Para el dato del 'Menos vendido'"""
+        query = """
+            SELECT p.nombre, SUM(dv.cantidad) as total 
+            FROM detalle_ventas dv
+            JOIN productos p ON dv.producto_id = p.id
+            JOIN ventas v ON dv.venta_id = v.id
+            WHERE v.fecha::date BETWEEN %s AND %s
+            GROUP BY p.nombre ORDER BY total ASC LIMIT 1
+        """
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(query, (inicio, fin))
+                return cur.fetchone()
+        except: return ("N/A", 0)
+
+    def obtener_metodos_pago_pie(self, inicio, fin):
+        """Calcula el total por método de pago para estadísticas"""
+        query = """
+            SELECT metodo_pago, SUM(total) 
+            FROM public.ventas 
+            WHERE fecha::date BETWEEN %s AND %s 
+            GROUP BY metodo_pago
+        """
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(query, (inicio, fin))
+                return cur.fetchall()
+        except Exception as e:
+            print(f"Error en metodos_pago_pie: {e}")
+            return []
+    
+    def obtener_ultimas_ventas_detalladas(self, inicio, fin):
+        """Trae las últimas 5 ventas para la tabla del dashboard"""
+        query = "SELECT id, TO_CHAR(fecha, 'HH24:MI'), total, metodo_pago FROM ventas WHERE fecha::date BETWEEN %s AND %s ORDER BY fecha DESC LIMIT 5"
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(query, (inicio, fin))
+                return cur.fetchall()
+        except: return []
 
     def obtener_cierre_cajero(self, usuario_id, fecha=None):
         if not fecha:
