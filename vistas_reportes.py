@@ -68,15 +68,47 @@ class ReportesFrame(ctk.CTkFrame):
         canvas1 = FigureCanvasTkAgg(fig1, master=self.charts_container)
         canvas1.get_tk_widget().pack(side="left", fill="both", expand=True, padx=5)
 
-        # Gráfica 2: Torta (Métodos de Pago)
-        fig2, ax2 = plt.subplots(figsize=(4, 3), dpi=85, facecolor='#121212')
-        if metodos:
-            ax2.pie([m[1] for m in metodos], labels=[m[0] for m in metodos], autopct='%1.1f%%', 
-                    textprops={'color':"w", 'size':7}, colors=['#FFD600', '#00E676', '#2979FF', '#F44336'])
-            ax2.set_title("MÉTODOS DE PAGO", color='white', size=10)
+       # --- Gráfica 2: Torta (Métodos de Pago) ---
+        fig2, ax2 = plt.subplots(figsize=(5, 4), dpi=85, facecolor='#121212')
         
+        if metodos:
+            nombres = [m[0].capitalize() for m in metodos]
+            valores = [m[1] for m in metodos]
+            
+            # Colores asignados
+            colores = {'Efectivo': '#00E676', 'Pago movil': '#2979FF', 'Transferencia': '#FFD600', 'Zelle': '#AA00FF'}
+            lista_colores = [colores.get(n, '#FFFFFF') for n in nombres]
+            
+            # Dibujamos el pastel
+            wedges, texts, autotexts = ax2.pie(
+                valores, 
+                labels=None, 
+                autopct='%1.1f%%', 
+                startangle=140,
+                colors=lista_colores,
+                wedgeprops={'edgecolor': '#121212', 'linewidth': 2}
+            )
+            
+            plt.setp(autotexts, size=9, weight="bold", color="white")
+            
+            # Leyenda lateral limpia
+            ax2.legend(
+                wedges, nombres,
+                title="MÉTODOS",
+                loc="center left",
+                bbox_to_anchor=(1, 0, 0.5, 1),
+                fontsize=9,
+                frameon=False,
+                labelcolor='white'
+            )
+            
+            ax2.set_title("PAGOS POR MÉTODO", color='white', size=11, weight='bold', pad=10)
+        else:
+            ax2.text(0.5, 0.5, "Sin datos de pago", color="white", ha="center")
+            ax2.axis('off')
+
         canvas2 = FigureCanvasTkAgg(fig2, master=self.charts_container)
-        canvas2.get_tk_widget().pack(side="right", fill="both", expand=True, padx=5)
+        canvas2.get_tk_widget().pack(side="right", fill="both", expand=True, padx=10)
 
         # --- Actualizar Tabla ---
         for w in self.table_f.winfo_children(): w.destroy()

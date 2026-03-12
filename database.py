@@ -352,21 +352,32 @@ class Database:
         except: return ("N/A", 0)
 
     def obtener_metodos_pago_pie(self, inicio, fin):
-        """Calcula el total por método de pago para estadísticas"""
-        query = """
-            SELECT metodo_pago, SUM(total) 
-            FROM public.ventas 
-            WHERE fecha::date BETWEEN %s AND %s 
-            GROUP BY metodo_pago
+        # Usamos formato de string directo para evitar el error de parámetros del driver
+        query = f"""
+            SELECT 
+                CASE 
+                    WHEN metodo_pago ILIKE '%efectivo%' THEN 'Efectivo'
+                    WHEN metodo_pago ILIKE '%bio%' THEN 'Bio'
+                    WHEN metodo_pago ILIKE '%punto%' THEN 'Punto'
+                    WHEN metodo_pago ILIKE '%pago móvil%' OR metodo_pago ILIKE '%pago movil%' THEN 'Pago Móvil'
+                    WHEN metodo_pago ILIKE '%transferencia%' THEN 'Transferencia'
+                    ELSE 'Otros'
+                END as metodo_limpio, 
+                SUM(total) 
+            FROM ventas 
+            WHERE fecha::date BETWEEN '{inicio}' AND '{fin}' 
+            GROUP BY metodo_limpio
+            HAVING SUM(total) > 0
         """
         try:
             with self.get_cursor() as cur:
-                cur.execute(query, (inicio, fin))
+                # Si el execute falla aquí, es que tu cursor espera CERO argumentos
+                cur.execute(query)
                 return cur.fetchall()
         except Exception as e:
-            print(f"Error en metodos_pago_pie: {e}")
+            print(f"Error fatal en SQL: {e}")
             return []
-    
+        
     def obtener_ultimas_ventas_detalladas(self, inicio, fin):
         """Trae las últimas 5 ventas para la tabla del dashboard"""
         query = "SELECT id, TO_CHAR(fecha, 'HH24:MI'), total, metodo_pago FROM ventas WHERE fecha::date BETWEEN %s AND %s ORDER BY fecha DESC LIMIT 5"
