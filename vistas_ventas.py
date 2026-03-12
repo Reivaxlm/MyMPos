@@ -313,47 +313,66 @@ class VentasFrame(ctk.CTkFrame):
 
         for e in entradas.values(): e.bind("<KeyRelease>", actualizar_calculadora)
 
-        def agregar_fila(metodo):
+        def agregar_fila(metodo_inicial):
             f = ctk.CTkFrame(scroll, fg_color="#333333")
-            f.pack(fill="x", pady=2)
-            ctk.CTkLabel(f, text=metodo, width=80).pack(side="left", padx=5)
+            f.pack(fill="x", pady=2) 
+            
+            metodo_var = ctk.StringVar(value=metodo_inicial)
+            opciones = ctk.CTkOptionMenu(f, values=["Pago Móvil", "Transferencia"], variable=metodo_var, width=120)
+            opciones.pack(side="left", padx=5)
+            
             monto = ctk.CTkEntry(f, placeholder_text="Bs", width=80)
             monto.bind("<KeyRelease>", actualizar_calculadora)
             monto.pack(side="left", padx=5)
+            
             ref = ctk.CTkEntry(f, placeholder_text="Ref", width=80)
             ref.pack(side="left", padx=5)
-            self.lista_dinamica.append({'tipo': metodo, 'monto': monto, 'ref': ref})
-
-        ctk.CTkButton(vent_pago, text="➕ Agregar PM o Transf", command=lambda: agregar_fila("Pago Móvil")).pack(pady=5)
+            
+            self.lista_dinamica.append({'tipo': metodo_var, 'monto': monto, 'ref': ref})
+            actualizar_calculadora()
 
         def finalizar():
             try:
+                # 1. Calculamos montos fijos
                 m_usd = parse_monto(entradas['efectivo_usd'].get()) * self.app.tasa
                 m_bs = parse_monto(entradas['efectivo_bs'].get())
                 m_bio = parse_monto(entradas['bio'].get())
                 m_punto = parse_monto(entradas['punto'].get())
                 
-                detalles_list = [f"Efectivo $: {entradas['efectivo_usd'].get()}", f"Efectivo Bs: {entradas['efectivo_bs'].get()}", f"Bio: {entradas['bio'].get()}", f"Punto: {entradas['punto'].get()}"]
+                # 2. Creamos la lista de detalles con los montos reales (solo si son > 0)
+                detalles_finales = []
+                if parse_monto(entradas['efectivo_usd'].get()) > 0:
+                    detalles_finales.append(f"Efectivo $: {entradas['efectivo_usd'].get()}")
+                if m_bs > 0: detalles_finales.append(f"Efectivo Bs: {m_bs}")
+                if m_bio > 0: detalles_finales.append(f"Bio: {m_bio}")
+                if m_punto > 0: detalles_finales.append(f"Punto: {m_punto}")
+                
                 total_p = m_usd + m_bs + m_bio + m_punto
                 
+                # 3. Agregamos los pagos dinámicos (Pago Móvil / Transferencia)
                 for p in self.lista_dinamica:
+                    # Usamos .get() porque ahora 'tipo' es un StringVar del OptionMenu
+                    nombre_metodo = p['tipo'].get() if hasattr(p['tipo'], 'get') else p['tipo']
                     m = parse_monto(p['monto'].get())
                     r = p['ref'].get().strip()
+                    
                     if m > 0:
                         if not r:
-                            messagebox.showerror("Error", f"Falta referencia en {p['tipo']}")
+                            messagebox.showerror("Error", f"Falta referencia en {nombre_metodo}")
                             return
                         total_p += m
-                        detalles_list.append(f"{p['tipo']}: {m}Bs (Ref: {r})")
+                        detalles_finales.append(f"{nombre_metodo}: {m} (Ref: {r})")
 
+                # 4. Validación de pago completo
                 if total_p < (total_bs - 0.01):
                     messagebox.showerror("Error", "Monto insuficiente")
                     return
 
-                metodo_detalle = " | ".join(detalles_list)
-                datos_v = {'total_usd': total_usd, 'metodo': metodo_detalle}
+                # 5. UNIMOS TODO EN UNA SOLA CADENA
+                metodo_detalle = " | ".join(detalles_finales)
                 
-                # GUARDADO CON EL ID DEL CLIENTE SELECCIONADO
+                # EL RESTO DEL CÓDIGO SE MANTIENE IGUAL...
+                datos_v = {'total_usd': total_usd, 'metodo': metodo_detalle}
                 id_v = self.app.db.crear_venta(datos_v, self.app.usuario_actual[0], cliente[0], self.app.tasa)
                 
                 if id_v:
@@ -385,7 +404,18 @@ class VentasFrame(ctk.CTkFrame):
                     self.vaciar_carrito()
             except Exception as e:
                 messagebox.showerror("Error", f"Error: {e}")
+        for e in entradas.values(): e.bind("<KeyRelease>", actualizar_calculadora)
 
+        # EL BOTÓN DE AGREGAR: Fuera de las funciones, empaquetado en vent_pago
+        btn_pago_e = ctk.CTkButton(
+            vent_pago, 
+            text="➕ Agregar Pago Electrónico", 
+            fg_color="#1f538d",
+            command=lambda: agregar_fila("Pago Móvil")
+        )
+        btn_pago_e.pack(pady=10)
+
+        # BOTÓN CONFIRMAR
         ctk.CTkButton(vent_pago, text="CONFIRMAR COBRO", fg_color="green", command=finalizar).pack(pady=20)
         self.lista_pagos = []
 

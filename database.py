@@ -351,6 +351,12 @@ class Database:
                 return cur.fetchone()
         except: return ("N/A", 0)
 
+    def obtener_metodos_raw(self, inicio, fin):
+        query = "SELECT metodo_pago FROM ventas WHERE fecha::date BETWEEN %s AND %s"
+        with self.get_cursor() as cur:
+            cur.execute(query, (inicio, fin))
+            return cur.fetchall()
+    
     def obtener_metodos_pago_pie(self, inicio, fin):
         # Usamos formato de string directo para evitar el error de parámetros del driver
         query = f"""
@@ -378,15 +384,36 @@ class Database:
             print(f"Error fatal en SQL: {e}")
             return []
         
+    def obtener_ventas_por_hora(self, inicio, fin):
+        # Cambiamos SUM(total_usd) por SUM(total)
+        query = """
+            SELECT EXTRACT(HOUR FROM fecha) as hora, SUM(total) as total
+            FROM public.ventas
+            WHERE fecha::date BETWEEN %s AND %s
+            GROUP BY hora
+            ORDER BY hora
+        """
+        with self.get_cursor() as cur:
+            cur.execute(query, (inicio, fin))
+            return cur.fetchall()
+        
     def obtener_ultimas_ventas_detalladas(self, inicio, fin):
-        """Trae las últimas 5 ventas para la tabla del dashboard"""
-        query = "SELECT id, TO_CHAR(fecha, 'HH24:MI'), total, metodo_pago FROM ventas WHERE fecha::date BETWEEN %s AND %s ORDER BY fecha DESC LIMIT 5"
-        try:
-            with self.get_cursor() as cur:
-                cur.execute(query, (inicio, fin))
-                return cur.fetchall()
-        except: return []
-
+        query = """
+            SELECT v.id, 
+                TO_CHAR(v.fecha, 'HH12:MI AM') as hora, 
+                COALESCE(c.nombre, 'Sin Cliente') as cliente, 
+                CONCAT(v.total, ' $') as monto, 
+                v.metodo_pago 
+            FROM public.ventas v
+            LEFT JOIN public.clientes c ON v.cliente_id = c.id
+            WHERE v.fecha::date BETWEEN %s AND %s
+            ORDER BY v.fecha DESC
+            LIMIT 10
+        """
+        with self.get_cursor() as cur:
+            cur.execute(query, (inicio, fin))
+            return cur.fetchall()
+            
     def obtener_cierre_cajero(self, usuario_id, fecha=None):
         if not fecha:
             from datetime import date

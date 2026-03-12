@@ -7,3 +7,6 @@ urllib3
 reportlab
 python-dotenv
 matplotlib
+col
+pandas
+openpyxl
