@@ -16,18 +16,46 @@ class VentasFrame(ctk.CTkFrame):
     def setup_ui(self):
         self.pack(fill="both", expand=True, padx=20, pady=10)
         
+        # --- ESTILOS DE TABLA GLOBALES ---
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("Treeview",
+            background="#1E1E1E",
+            foreground="white",
+            rowheight=35,
+            fieldbackground="#1E1E1E",
+            bordercolor="#333333",
+            borderwidth=0,
+            font=("Segoe UI", 12)
+        )
+        style.map("Treeview", background=[('selected', '#2979FF')])
+        style.configure("Treeview.Heading",
+            background="#252525",
+            foreground="white",
+            relief="flat",
+            font=("Segoe UI", 12, "bold")
+        )
+
+        # --- PANEL SUPERIOR ---
         self.top_frame = ctk.CTkFrame(self, fg_color="transparent")
-        self.top_frame.pack(fill="x", pady=5)
+        self.top_frame.pack(fill="x", pady=(0, 15))
 
-        # --- BUSCADOR ---
-        ctk.CTkLabel(self.top_frame, text="BUSCAR:").pack(side="left", padx=5)
-        self.entry_buscar = ctk.CTkEntry(self.top_frame, placeholder_text="Escriba aquí...", width=400)
-        self.entry_buscar.pack(side="left", padx=5)
+        # Buscador moderno guiado
+        busqueda_frame = ctk.CTkFrame(self.top_frame, fg_color="transparent")
+        busqueda_frame.pack(side="left", fill="x", expand=True)
+        
+        ctk.CTkLabel(busqueda_frame, text="🔍", font=("Segoe UI", 20)).pack(side="left", padx=(0, 10))
+        self.entry_buscar = ctk.CTkEntry(busqueda_frame, placeholder_text="Buscar por nombre o código de barra...", 
+                                       height=45, font=("Segoe UI", 16), corner_radius=8)
+        self.entry_buscar.pack(side="left", fill="x", expand=True)
         self.entry_buscar.bind("<KeyRelease>", self._filtrar_busqueda_combo)
+        self.entry_buscar.bind("<Return>", lambda e: self.agregar_desde_lista(None))
 
-        ctk.CTkButton(self.top_frame, text="CIERRE DE CAJA", fg_color="#FBC02D", 
-                      text_color="black", command=self.ejecutar_cierre_desde_interfaz, 
-                      width=150).pack(side="left", padx=20)
+        # Botón de cierre más elegante
+        ctk.CTkButton(self.top_frame, text="🔒 CIERRE DE CAJA", fg_color="#FBC02D", hover_color="#F9A825",
+                      text_color="black", height=45, corner_radius=8, font=("Segoe UI", 14, "bold"),
+                      command=self.ejecutar_cierre_desde_interfaz, 
+                      width=180).pack(side="right", padx=(20, 0))
         
         # LISTA DE SUGERENCIAS (El menú desplegable que faltaba)
         self.lista_sugerencias = tk.Listbox(
@@ -42,12 +70,19 @@ class VentasFrame(ctk.CTkFrame):
         self.bind("<Button-1>", lambda e: self.lista_sugerencias.place_forget())
 
         # --- TABLA DE CARRITO (Mecanismo Treeview) ---
+        # Contenedor para darle borde moderno a la tabla
+        tabla_container = ctk.CTkFrame(self, fg_color="#1E1E1E", corner_radius=10)
+        tabla_container.pack(fill="both", expand=True, pady=10)
+        
         columnas = ("Cant", "Producto", "Precio $", "Subtotal $")
-        self.tree = ttk.Treeview(self, columns=columnas, show="headings", height=15)
+        self.tree = ttk.Treeview(tabla_container, columns=columnas, show="headings", height=15)
         for col in columnas:
             self.tree.heading(col, text=col)
-            self.tree.column(col, width=100 if "Producto" not in col else 300)
-        self.tree.pack(fill="both", expand=True, pady=10)
+            # Acoplamos mejor los anchos y centramos el nombre
+            width = 350 if "Producto" in col else 120
+            self.tree.column(col, width=width, anchor="center")
+            
+        self.tree.pack(fill="both", expand=True, padx=2, pady=2)
 
         # Crear el menú que aparecerá al hacer clic derecho
         self.menu_tabla = tk.Menu(self, tearoff=0)
@@ -68,18 +103,27 @@ class VentasFrame(ctk.CTkFrame):
         self.tree.bind("-", lambda e: self.cambiar_cantidad_teclado(-1))
 
         # --- PANEL INFERIOR: TOTALES Y ACCIONES ---
-        panel_inf = ctk.CTkFrame(self, fg_color="transparent")
-        panel_inf.pack(fill="x", side="bottom", pady=10)
+        panel_inf = ctk.CTkFrame(self, fg_color="#1E1E1E", corner_radius=15, height=90)
+        panel_inf.pack(fill="x", side="bottom", pady=(10, 0))
+        panel_inf.pack_propagate(False) # Mantener altura fija
 
-        self.lbl_total = ctk.CTkLabel(panel_inf, text="TOTAL: $ 0.00", font=("Arial", 28, "bold"), text_color="#00E676")
-        self.lbl_total.pack(side="left", padx=20)
+        # Contenedor de Totales (Izquierda)
+        totales_frame = ctk.CTkFrame(panel_inf, fg_color="transparent")
+        totales_frame.pack(side="left", padx=20, pady=15)
 
-        self.lbl_total_bs = ctk.CTkLabel(panel_inf, text="0.00 Bs", font=("Arial", 20), text_color="orange")
-        self.lbl_total_bs.pack(side="left", padx=10)
+        self.lbl_total = ctk.CTkLabel(totales_frame, text="TOTAL: $ 0.00", font=("Segoe UI", 36, "bold"), text_color="#00E676")
+        self.lbl_total.pack(side="left", padx=(0, 15))
 
-        ctk.CTkButton(panel_inf, text="VACIAR", fg_color="#FF1744", command=self.vaciar_carrito, width=100).pack(side="right", padx=10)
-        ctk.CTkButton(panel_inf, text="ELIMINAR PRODUCTO", fg_color="#D32F2F", command=self.eliminar_item_seleccionado, width=120).pack(side="right", padx=10)
-        ctk.CTkButton(panel_inf, text="PROCESAR PAGO", fg_color="#2979FF", command=self.cobrar, height=45, font=("Arial", 14, "bold")).pack(side="right", padx=10)
+        self.lbl_total_bs = ctk.CTkLabel(totales_frame, text="0.00 Bs", font=("Segoe UI", 22, "bold"), text_color="#FFB300")
+        self.lbl_total_bs.pack(side="left", pady=(10, 0)) # Ligero ajuste hacia abajo
+
+        # Contenedor de Botones (Derecha)
+        btn_frame = ctk.CTkFrame(panel_inf, fg_color="transparent")
+        btn_frame.pack(side="right", padx=20, pady=15)
+
+        ctk.CTkButton(btn_frame, text="🧹 Vaciar", fg_color="transparent", hover_color="#331111", border_width=1, border_color="#FF1744", text_color="#FF1744", command=self.vaciar_carrito, width=110, height=45, font=("Segoe UI", 14, "bold"), corner_radius=8).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="🗑️ Eliminar Prod.", fg_color="#D32F2F", hover_color="#B71C1C", command=self.eliminar_item_seleccionado, width=140, height=45, font=("Segoe UI", 14, "bold"), corner_radius=8).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="💳 PROCESAR PAGO", fg_color="#2979FF", hover_color="#1565C0", command=self.cobrar, width=200, height=55, font=("Segoe UI", 16, "bold"), corner_radius=8).pack(side="left", padx=(15, 0))
 
     # --- MÉTODO PARA EL CIERRE ---
     def ejecutar_cierre_desde_interfaz(self):
@@ -96,8 +140,8 @@ class VentasFrame(ctk.CTkFrame):
         if hasattr(self, '_after_id'):
             self.after_cancel(self._after_id)
         
-        # Programar la búsqueda para dentro de 200ms
-        self._after_id = self.after(200, self._ejecutar_busqueda_real)
+        # Debounce más rápido para sentirse instantáneo
+        self._after_id = self.after(100, self._ejecutar_busqueda_real)
 
     def _ejecutar_busqueda_real(self):
         texto = self.entry_buscar.get().strip()
@@ -109,33 +153,37 @@ class VentasFrame(ctk.CTkFrame):
         
         self.lista_sugerencias.delete(0, tk.END)
         if productos:
-            for p in productos:
-                self.lista_sugerencias.insert(tk.END, f"{p[0]} | ${p[1]} | Stock: {p[2]}")
+            # Iterar menos items y hacerlo más compacto
+            for p in productos[:7]:  # p = (id, nombre, precio, stock)
+                self.lista_sugerencias.insert(tk.END, f"{p[1]} | ${p[2]} | Stock: {p[3]}")
             
-            # 1. Calculamos la posición
+            # Calculamos la posición correcta y ajustamos el ancho base a la caja
             x_pos = self.entry_buscar.winfo_x()
             y_pos = self.entry_buscar.winfo_y() + self.entry_buscar.winfo_height()
             
-            # 2. La mostramos
-            self.lista_sugerencias.place(x=x_pos, y=y_pos)
-            
-            # 3. EL TRUCO: La traemos al frente de la tabla
+            self.lista_sugerencias.place(x=x_pos, y=y_pos, width=self.entry_buscar.winfo_width())
             self.lista_sugerencias.lift() 
         else:
             self.lista_sugerencias.place_forget()
 
     def agregar_desde_lista(self, event):
         seleccion = self.lista_sugerencias.curselection()
-        if not seleccion: return
-        
-        item_texto = self.lista_sugerencias.get(seleccion[0])
+        if not seleccion:
+            # Si no hay selección pero se presionó Enter, tomamos el primer item si existe
+            if self.lista_sugerencias.size() > 0:
+                idx = 0
+            else: return
+        else:
+            idx = seleccion[0]
+            
+        item_texto = self.lista_sugerencias.get(idx)
         nombre_prod = item_texto.split(" | ")[0]
         
         # Obtenemos datos frescos de ese producto
         res = self.app.db.consultar_producto_rapido(nombre_prod)
         if res:
-            p = res[0]
-            self.agregar_al_carrito(p[0], float(p[1]), p[2])
+            p = res[0] # (id, nombre, precio, stock)
+            self.agregar_al_carrito(p[0], p[1], float(p[2]), p[3])
         
         self.entry_buscar.delete(0, tk.END)
         self.lista_sugerencias.place_forget()
@@ -164,7 +212,7 @@ class VentasFrame(ctk.CTkFrame):
         else:
             print(f"DEBUG: El producto {nombre_p} no está en el carrito.")
 
-    def agregar_al_carrito(self, nombre, precio, stock_max):
+    def agregar_al_carrito(self, pid, nombre, precio, stock_max):
         # 1. Verificar si el producto ya está en el carrito
         if nombre in self.app.carrito:
             # Si ya existe, aumentamos la cantidad en 1
@@ -179,6 +227,7 @@ class VentasFrame(ctk.CTkFrame):
         else:
             # Si es nuevo, lo agregamos con cantidad 1
             self.app.carrito[nombre] = {
+                'id': pid,
                 'precio': precio,
                 'cant': 1
             }
@@ -215,7 +264,7 @@ class VentasFrame(ctk.CTkFrame):
         frame_pago.pack(fill="x", pady=5)
         
         # Combo para tipo de pago
-        tipo = ctk.CTkComboBox(frame_pago, values=["Pago Móvil", "Transferencia", "Biopago", "Efectivo"], width=120)
+        tipo = ctk.CTkComboBox(frame_pago, values=["Punto", "Pago Móvil", "Efectivo", "Transferencia"], width=120)
         tipo.pack(side="left", padx=5)
         
         # Campo de monto
@@ -377,17 +426,8 @@ class VentasFrame(ctk.CTkFrame):
                 
                 if id_v:
                     for nom, d in self.app.carrito.items():
-                        # 1. Registro del ítem
-                        self.app.db.registrar_item_venta(id_v, nom, d['cant'], d['precio'], float(d['precio'])*int(d['cant']))
-                        
-                        # 2. Descuento de stock con validación de consola
-                        print(f"DEBUG: Intentando descontar {d['cant']} de producto '{nom}'")
-                        # Debes obtener el código del producto desde 'd' (si tu carrito guarda el código)
-                        resultado = self.app.db.descontar_stock(nom, d['cant'])
-                        
-                        if resultado is False: # O el valor que retorne tu función cuando falla
-                            messagebox.showerror("Error", f"No se pudo descontar el stock de {nom}")
-                            return
+                        # REGISTRO DE ITEM (Automáticamente descuenta stock)
+                        self.app.db.registrar_item_venta(id_v, d['id'], d['cant'], d['precio'], float(d['precio'])*int(d['cant']))
                     
                     generar_factura_pdf(
                         id_v, 

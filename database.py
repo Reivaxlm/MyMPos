@@ -101,14 +101,27 @@ class Database:
             print(f"Error obtener_todos_los_productos: {e}")
             return []
 
-    def buscar_productos_por_texto(self, texto, limit=12):
+    def buscar_productos_por_texto(self, texto, limit=50):
         try:
             with self.get_cursor() as cur:
                 patron = f"%{texto}%"
-                cur.execute(
-                    "SELECT codigo_barras, nombre, precio_venta, stock FROM productos WHERE nombre ILIKE %s OR codigo_barras ILIKE %s ORDER BY nombre LIMIT %s",
-                    (patron, patron, limit)
-                )
+                query = """
+                    SELECT 
+                        p.id, 
+                        p.codigo_barras, 
+                        p.nombre, 
+                        p.precio_compra, 
+                        p.precio_venta, 
+                        p.stock,
+                        COALESCE(SUM(dv.cantidad), 0) AS vendidos
+                    FROM productos p
+                    LEFT JOIN detalle_ventas dv ON p.id = dv.producto_id
+                    WHERE p.nombre ILIKE %s OR p.codigo_barras ILIKE %s
+                    GROUP BY p.id
+                    ORDER BY p.nombre 
+                    LIMIT %s
+                """
+                cur.execute(query, (patron, patron, limit))
                 return cur.fetchall()
         except Exception as e:
             print(f"Error buscar_productos_por_texto: {e}")
@@ -145,6 +158,21 @@ class Database:
             print(f"Error al descontar stock: {e}")
             return False
 
+    def aumentar_stock(self, producto_id, cantidad, nuevo_costo=None):
+        """Aumenta el stock de un producto y opcionalmente actualiza su precio de compra"""
+        try:
+            with self.get_cursor() as cur:
+                if nuevo_costo is not None:
+                    query = "UPDATE productos SET stock = stock + %s, precio_compra = %s WHERE id = %s"
+                    cur.execute(query, (cantidad, nuevo_costo, producto_id))
+                else:
+                    query = "UPDATE productos SET stock = stock + %s WHERE id = %s"
+                    cur.execute(query, (cantidad, producto_id))
+                return True
+        except Exception as e:
+            print(f"Error al aumentar stock: {e}")
+            return False
+
     def get_producto_por_codigo(self, codigo):
         try:
             with self.get_cursor() as cur:
@@ -171,13 +199,28 @@ class Database:
 
         try:
             with self.get_cursor() as cur:
+                # 1. Generar nuevo ID MyM
+                cur.execute("SELECT id FROM ventas ORDER BY id DESC LIMIT 1")
+                last_row = cur.fetchone()
+                if last_row:
+                    try:
+                        # Extraer numero, manejar caso de que no tenga MyM
+                        val = str(last_row[0])
+                        num_str = "".join(filter(str.isdigit, val))
+                        nuevo_num = int(num_str) + 1 if num_str else 1
+                        nuevo_id = f"MyM{nuevo_num:03d}"
+                    except:
+                        nuevo_id = f"MyM{int(datetime.datetime.now().timestamp())}"
+                else:
+                    nuevo_id = "MyM001"
+
                 total = _to_float(datos_pago.get('total_usd', datos_pago.get('total', 0)))
                 metodo = datos_pago.get('metodo') or 'mixto'
                 query_venta = """
-                    INSERT INTO ventas (vendedor_id, cliente_id, total, metodo_pago, fecha) 
-                    VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING id
+                    INSERT INTO ventas (id, vendedor_id, cliente_id, total, metodo_pago, fecha) 
+                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP) RETURNING id
                 """
-                cur.execute(query_venta, (vendedor_id, cliente_id, total, metodo))
+                cur.execute(query_venta, (nuevo_id, vendedor_id, cliente_id, total, metodo))
                 row = cur.fetchone()
                 return row[0] if row else None
         except Exception as e:
@@ -185,6 +228,13 @@ class Database:
             return None
 
     def obtener_venta(self, venta_id):
+        # Normalizar entrada
+        if isinstance(venta_id, (int, str)):
+            s_id = str(venta_id).upper().strip()
+            num_part = "".join(filter(str.isdigit, s_id))
+            if num_part:
+                venta_id = f"MyM{int(num_part):03d}"
+            
         try:
             with self.get_cursor() as cur:
                 cur.execute("""
@@ -201,7 +251,27 @@ class Database:
             print(f"Error al obtener venta: {e}")
             return None
 
+    def buscar_ventas_por_cliente(self, nombre):
+        """Busca ventas asociadas a un nombre de cliente"""
+        query = """
+            SELECT v.id, v.fecha, c.nombre, v.total
+            FROM ventas v
+            JOIN clientes c ON v.cliente_id = c.id
+            WHERE c.nombre ILIKE %s
+            ORDER BY v.fecha DESC LIMIT 10
+        """
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(query, (f"%{nombre}%",))
+                return cur.fetchall()
+        except: return []
+
     def obtener_items_venta(self, venta_id):
+        if isinstance(venta_id, (int, str)):
+            s_id = str(venta_id).upper().strip()
+            num_part = "".join(filter(str.isdigit, s_id))
+            if num_part:
+                venta_id = f"MyM{int(num_part):03d}"
         try:
             with self.get_cursor() as cur:
                 cur.execute("SELECT producto_id, cantidad, precio_unitario, subtotal FROM detalle_ventas WHERE venta_id = %s", (venta_id,))
@@ -219,19 +289,7 @@ class Database:
             print(f"Error get_producto_por_id: {e}")
             return None
 
-    def insertar_detalle_venta(self, venta_id, producto_id, cantidad, precio_unitario, subtotal):
-        try:
-            with self.get_cursor() as cur:
-                cur.execute(
-                    "INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (%s, %s, %s, %s, %s)",
-                    (venta_id, producto_id, cantidad, precio_unitario, subtotal)
-                )
-                return True
-        except Exception as e:
-            print(f"Error insertar_detalle_venta: {e}")
-            return False
         
-    # Agrega este método a tu clase Database en database.py
     def obtener_totales_cierre_hoy(self):
         """Consulta los totales de venta agrupados por método de pago para hoy"""
         query = """
@@ -294,19 +352,6 @@ class Database:
             print(f"Error get_cliente_por_id: {e}")
             return None
 
-    def obtener_detalle_ventas_por_fecha(self, fecha):
-        try:
-            with self.get_cursor() as cur:
-                cur.execute("""
-                    SELECT v.id, v.fecha::time, v.total, v.metodo_pago, v.referencia, u.username
-                    FROM ventas v
-                    LEFT JOIN usuarios u ON v.vendedor_id = u.id
-                    WHERE v.fecha::date = %s ORDER BY v.id DESC
-                """, (fecha,))
-                return cur.fetchall()
-        except Exception as e:
-            print(f"Error en reporte detallado: {e}")
-            return []
 
         
     def obtener_resumen_kpi(self, inicio, fin):
@@ -335,21 +380,6 @@ class Database:
                 return cur.fetchall()
         except: return []
 
-    def obtener_peor_producto(self, inicio, fin):
-        """Para el dato del 'Menos vendido'"""
-        query = """
-            SELECT p.nombre, SUM(dv.cantidad) as total 
-            FROM detalle_ventas dv
-            JOIN productos p ON dv.producto_id = p.id
-            JOIN ventas v ON dv.venta_id = v.id
-            WHERE v.fecha::date BETWEEN %s AND %s
-            GROUP BY p.nombre ORDER BY total ASC LIMIT 1
-        """
-        try:
-            with self.get_cursor() as cur:
-                cur.execute(query, (inicio, fin))
-                return cur.fetchone()
-        except: return ("N/A", 0)
 
     def obtener_metodos_raw(self, inicio, fin):
         query = "SELECT metodo_pago FROM ventas WHERE fecha::date BETWEEN %s AND %s"
@@ -357,32 +387,6 @@ class Database:
             cur.execute(query, (inicio, fin))
             return cur.fetchall()
     
-    def obtener_metodos_pago_pie(self, inicio, fin):
-        # Usamos formato de string directo para evitar el error de parámetros del driver
-        query = f"""
-            SELECT 
-                CASE 
-                    WHEN metodo_pago ILIKE '%efectivo%' THEN 'Efectivo'
-                    WHEN metodo_pago ILIKE '%bio%' THEN 'Bio'
-                    WHEN metodo_pago ILIKE '%punto%' THEN 'Punto'
-                    WHEN metodo_pago ILIKE '%pago móvil%' OR metodo_pago ILIKE '%pago movil%' THEN 'Pago Móvil'
-                    WHEN metodo_pago ILIKE '%transferencia%' THEN 'Transferencia'
-                    ELSE 'Otros'
-                END as metodo_limpio, 
-                SUM(total) 
-            FROM ventas 
-            WHERE fecha::date BETWEEN '{inicio}' AND '{fin}' 
-            GROUP BY metodo_limpio
-            HAVING SUM(total) > 0
-        """
-        try:
-            with self.get_cursor() as cur:
-                # Si el execute falla aquí, es que tu cursor espera CERO argumentos
-                cur.execute(query)
-                return cur.fetchall()
-        except Exception as e:
-            print(f"Error fatal en SQL: {e}")
-            return []
         
     def obtener_ventas_por_hora(self, inicio, fin):
         # Cambiamos SUM(total_usd) por SUM(total)
@@ -444,7 +448,7 @@ class Database:
         # 1. Agregamos LIMIT 10 para no saturar la interfaz con 100 resultados
         # 2. Priorizamos que empiece por el texto (más rápido con índices)
         query = """
-            SELECT nombre, precio_venta, stock 
+            SELECT id, nombre, precio_venta, stock 
             FROM productos 
             WHERE nombre ILIKE %s 
             OR codigo_barras = %s 
@@ -460,18 +464,68 @@ class Database:
             print(f"Error en consulta rápida: {e}")
             return []
 
-    def registrar_item_venta(self, venta_id, producto_nombre, cantidad, precio_unitario, subtotal):
+    def registrar_item_venta(self, venta_id, producto_id, cantidad, precio_unitario, subtotal):
         query_item = """
             INSERT INTO detalle_ventas (venta_id, producto_id, cantidad, precio_unitario, subtotal)
-            VALUES (%s, (SELECT id FROM productos WHERE nombre = %s LIMIT 1), %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s)
         """
-        query_stock = "UPDATE productos SET stock = stock - %s WHERE nombre = %s"
+        query_stock = "UPDATE productos SET stock = stock - %s WHERE id = %s"
         try:
             with self.get_cursor() as cur:
-                cur.execute(query_item, (venta_id, producto_nombre, cantidad, precio_unitario, subtotal))
-                cur.execute(query_stock, (cantidad, producto_nombre))
+                cur.execute(query_item, (venta_id, producto_id, cantidad, precio_unitario, subtotal))
+                cur.execute(query_stock, (cantidad, producto_id))
                 return True
         except Exception as e:
             print(f"Error al registrar detalle: {e}")
             return False
+
+    def registrar_devolucion(self, venta_id, producto_id, cantidad, motivo, vendedor_id):
+        """Registra una devolución, devuelve el stock y descuenta del historial si es necesario"""
+        try:
+            with self.get_cursor() as cur:
+                # 1. Insertar registro de devolución
+                query_dev = """
+                    INSERT INTO devoluciones (venta_id, producto_id, cantidad, motivo, vendedor_id)
+                    VALUES (%s, %s, %s, %s, %s)
+                """
+                cur.execute(query_dev, (venta_id, producto_id, cantidad, motivo, vendedor_id))
+                
+                # 2. Devolver stock al producto
+                query_stock = "UPDATE productos SET stock = stock + %s WHERE id = %s"
+                cur.execute(query_stock, (cantidad, producto_id))
+                
+                return True
+        except Exception as e:
+            print(f"Error al registrar devolución: {e}")
+            return False
+
+    def obtener_resumen_devoluciones(self, inicio, fin):
+        """Obtiene el total de devoluciones en un rango de fechas"""
+        query = """
+            SELECT COUNT(d.id), COALESCE(SUM(d.cantidad * p.precio_venta), 0)
+            FROM devoluciones d
+            JOIN productos p ON d.producto_id = p.id
+            WHERE d.fecha::date BETWEEN %s AND %s
+        """
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(query, (inicio, fin))
+                return cur.fetchone()
+        except Exception as e:
+            print(f"Error obtener_resumen_devoluciones: {e}")
+            return (0, 0.0)
+
+    def obtener_devoluciones_por_fecha(self, inicio, fin):
+        """Obtiene el histórico de devoluciones para la gráfica"""
+        query = """
+            SELECT d.fecha::date as dia, COUNT(d.id)
+            FROM devoluciones d
+            WHERE d.fecha::date BETWEEN %s AND %s
+            GROUP BY dia ORDER BY dia
+        """
+        try:
+            with self.get_cursor() as cur:
+                cur.execute(query, (inicio, fin))
+                return cur.fetchall()
+        except: return []
 # .\.venv\Scripts\activate.bat

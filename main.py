@@ -9,6 +9,8 @@ from vistas_inventario import InventarioFrame
 from vistas_reportes import ReportesFrame
 from vistas_precios import PreciosFrame
 from vistas_usuarios import UsuariosFrame
+from vistas_compras import ComprasFrame
+from vistas_devoluciones import DevolucionesFrame
 from utilidades import parse_monto
 
 class MyMPos(ctk.CTk):
@@ -18,8 +20,10 @@ class MyMPos(ctk.CTk):
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
         
-        # Escalado para Termux (para que no se vea minúsculo)
-        ctk.set_widget_scaling(1.1) 
+        # Escalado y fuentes globales
+        ctk.set_widget_scaling(1.1)
+        self.fuente_principal = ("Segoe UI", 14)
+        self.fuente_titulos = ("Segoe UI", 24, "bold")
         
         self.db = Database()
         self.tasa = 1.0
@@ -51,21 +55,22 @@ class MyMPos(ctk.CTk):
         self.configure(fg_color="#0F0F0F") # Fondo ultra oscuro
 
         # SIDEBAR ESTILIZADO
-        self.sidebar = ctk.CTkFrame(self, width=100, fg_color="#161616", corner_radius=0)
+        self.sidebar = ctk.CTkFrame(self, width=80, fg_color="#1A1A1A", corner_radius=0)
         self.sidebar.pack(side="left", fill="y")
         
         # Logo o Avatar en el Sidebar
-        ctk.CTkLabel(self.sidebar, text="MyM", font=("Impact", 24), text_color="#3b8ed0").pack(pady=20)
+        self.logo_label = ctk.CTkLabel(self.sidebar, text="MyM", font=("Segoe UI Black", 24), text_color="#2979FF")
+        self.logo_label.pack(pady=30)
         
         # Botones de navegación rápida con iconos
-        self.btn_home = ctk.CTkButton(self.sidebar, text="🏠", width=60, height=60, 
-                                     fg_color="transparent", hover_color="#222222",
-                                     font=("Arial", 24), command=self.mostrar_dashboard)
+        self.btn_home = ctk.CTkButton(self.sidebar, text="🏠", width=50, height=50, 
+                                     fg_color="transparent", hover_color="#2B2B2B",
+                                     font=("Arial", 28), command=self.mostrar_dashboard)
         self.btn_home.pack(pady=10)
 
         # CONTENEDOR PRINCIPAL CON BORDES REDONDEADOS
-        self.contenedor = ctk.CTkFrame(self, fg_color="#121212") # Un poco más claro que el negro puro
-        self.contenedor.pack(side="right", fill="both", expand=True, padx=20, pady=20)
+        self.contenedor = ctk.CTkFrame(self, fg_color="#121212", corner_radius=15)
+        self.contenedor.pack(side="right", fill="both", expand=True, padx=(10, 20), pady=20)
         self.mostrar_dashboard()
 
     def ir(self, clase_frame):
@@ -86,35 +91,133 @@ class MyMPos(ctk.CTk):
         container = ctk.CTkFrame(self.contenedor, fg_color="transparent")
         container.pack(expand=True, fill="both", padx=20, pady=20)
         
-        opciones = [
-            ("VENTAS", "🛒", "#00E676", VentasFrame),
-            ("PRECIOS", "🏷️", "#FFD600", PreciosFrame),
-            ("STOCK", "📦", "#AA00FF", InventarioFrame),
-            ("REPORTES", "📊", "#2979FF", ReportesFrame)
+        # Título en el dashboard - Más interactivo y llamativo
+        header = ctk.CTkFrame(container, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 20))
+        
+        import datetime, math
+        hora = datetime.datetime.now().hour
+        if hora < 12:
+            saludo = "🌅 ¡Buenos días"
+        elif hora < 19:
+            saludo = "☀️ ¡Buenas tardes"
+        else:
+            saludo = "🌙 ¡Buenas noches"
+            
+        nombre_user = self.usuario_actual[2] if self.usuario_actual else "Admin"
+            
+        # Un frame interno para darle un toque de color tipo tarjeta
+        self.saludo_card = ctk.CTkFrame(header, fg_color="#1E1E1E", corner_radius=15, border_width=2, border_color="#2979FF")
+        self.saludo_card.pack(fill="x", ipady=5, ipadx=20) # Reducido ipady
+        
+        self.lbl_saludo = ctk.CTkLabel(self.saludo_card, text=f"{saludo}, {nombre_user}!", font=("Segoe UI", 26, "bold"), text_color="#FFFFFF") # Tamaño fuente reducido
+        self.lbl_saludo.pack(anchor="w", padx=20, pady=(5, 0))
+        
+        self.lbl_rocket = ctk.CTkLabel(self.saludo_card, text="¿Qué módulo deseas utilizar hoy? 🚀", font=("Segoe UI", 13), text_color="#00E676") # Tamaño fuente reducido
+        self.lbl_rocket.pack(anchor="w", padx=20, pady=(2, 5))
+
+        # ---- Animación Pulsante de Cabecera ----
+        self.header_angle = 0
+        def animate_header():
+            try:
+                if not getattr(self, "saludo_card", None) or not self.saludo_card.winfo_exists(): return
+                self.header_angle += 0.1
+                grosor = 2 + math.sin(self.header_angle) * 1  # Brillo dinámico en borde
+                self.saludo_card.configure(border_width=grosor)
+                self.saludo_card.after(50, animate_header)
+            except Exception:
+                pass
+        animate_header()
+
+        # Grid para los botones
+        grid_frame = ctk.CTkFrame(container, fg_color="transparent")
+        grid_frame.pack(expand=True)
+
+        rol = self.usuario_actual[3] if self.usuario_actual else "Cajero"
+        
+        opciones_full = [
+            ("VENTAS", "🛒", "#00E676", VentasFrame, "Procesar y registrar ventas"),
+            ("STOCK", "📦", "#AA00FF", InventarioFrame, "Gestión del inventario"),
+            ("COMPRAS", "➕", "#FF5252", ComprasFrame, "Entrada de mercancía nueva"),
+            ("DEVOLUCIÓN", "🔄", "#F44336", DevolucionesFrame, "Gestión de reclamos y cambios"),
+            ("PRECIOS", "💰", "#FFD600", PreciosFrame, "Consulta rápida de precios"),
+            ("REPORTES", "📊", "#2979FF", ReportesFrame, "Métricas y movimientos"),
+            ("USUARIOS", "👤", "#00BCD4", UsuariosFrame, "Gestión de personal")
         ]
 
-        for i, (txt, ico, col, frame) in enumerate(opciones):
-            # Aquí llamamos a la nueva función de botón directo
-            btn = self.crear_boton(container, txt, ico, col, lambda f=frame: self.ir(f))
-            btn.grid(row=i//2, column=i%2, padx=20, pady=20)
+        # Filtrado por privilegios solicitado:
+        # Cajero: Ventas, Compras, Precios, Devolución.
+        if rol == "Cajero":
+            permitidos = ["VENTAS", "COMPRAS", "PRECIOS", "DEVOLUCIÓN"]
+            opciones = [opt for opt in opciones_full if opt[0] in permitidos]
+            cols = 2 # 2x2 para cajeros
+        else:
+            opciones = opciones_full
+            cols = 3 # 3-2-2 o similar para Admins
 
-    def crear_boton(self, master, texto, icono, color, comando):
-        
-        btn = ctk.CTkButton(
-            master,
-            text=f"{icono}\n\n{texto}", # Saltos de línea para organizar
-            font=("Segoe UI", 20, "bold"),
-            width=250,
-            height=220,
-            corner_radius=20,
-            fg_color="#1E1E1E",
-            hover_color="#2A2A2A",
-            border_width=3,
-            border_color=color,
-            command=comando,
-            anchor="center" # Centra todo el contenido
-        )
-        return btn
+        for i, (txt, ico, col, frame, desc) in enumerate(opciones):
+            btn = self.crear_boton(grid_frame, txt, ico, col, desc, lambda f=frame: self.ir(f))
+            btn.grid(row=i//cols, column=i%cols, padx=10, pady=10)
+
+    def crear_boton(self, master, texto, icono, color, desc, comando):
+        import math
+        class AnimatedButton(ctk.CTkFrame):
+            def __init__(self, parent, text, icon, col, description, cmd):
+                super().__init__(parent, width=280, height=210, corner_radius=15, fg_color="#1A1A1A", border_width=2, border_color=col)
+                self.pack_propagate(False)
+                self.comando = cmd
+                self.base_color = col
+                
+                # Elemento icono usando 'place' para facilitar la animación
+                self.icon_label = ctk.CTkLabel(self, text=icon, font=("Segoe UI", 55))
+                self.icon_label.place(relx=0.5, rely=0.35, anchor="center")
+                
+                self.title_label = ctk.CTkLabel(self, text=text, font=("Segoe UI", 20, "bold"), text_color="#FFFFFF")
+                self.title_label.place(relx=0.5, rely=0.70, anchor="center")
+                
+                self.desc_label = ctk.CTkLabel(self, text=description, font=("Segoe UI", 12), text_color="#AAAAAA")
+                self.desc_label.place(relx=0.5, rely=0.88, anchor="center")
+                
+                # Binds
+                for w in [self, self.icon_label, self.title_label, self.desc_label]:
+                    w.bind("<Enter>", self.on_enter)
+                    w.bind("<Leave>", self.on_leave)
+                    w.bind("<Button-1>", self.on_click)
+                    
+                self.anim_angle = 0.0
+                self.hovering = False
+                self.animate()
+                
+            def animate(self):
+                try:
+                    if not self.winfo_exists(): return
+                    self.anim_angle += 0.15
+                    
+                    # Si el usuario hace hover, la animación es más intensa
+                    multiplier = 0.04 if self.hovering else 0.015
+                    offset = math.sin(self.anim_angle) * multiplier
+                    
+                    self.icon_label.place(relx=0.5, rely=0.35 + offset, anchor="center")
+                    self.after(40, self.animate)
+                except Exception:
+                    pass
+                
+            def on_enter(self, e):
+                self.hovering = True
+                self.configure(fg_color="#222222", border_color="#FFFFFF")
+                self.icon_label.configure(font=("Segoe UI", 65)) # Crece al pasar el ratón
+                
+            def on_leave(self, e):
+                self.hovering = False
+                self.configure(fg_color="#1A1A1A", border_color=self.base_color)
+                self.icon_label.configure(font=("Segoe UI", 55))
+                
+            def on_click(self, e):
+                self.configure(border_width=4)
+                self.after(100, lambda: self.configure(border_width=2) if self.winfo_exists() else None)
+                if self.comando: self.comando()
+                
+        return AnimatedButton(master, texto, icono, color, desc, comando)
     
     def boton_cierre_caja(self):
         from modulo_cierre import realizar_cierre
