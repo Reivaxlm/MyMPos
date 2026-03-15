@@ -77,7 +77,7 @@ class ReportesFrame(ctk.CTkFrame):
         cant_dev, monto_dev = res_dev[0], res_dev[1]
         
         # Ajustar total restando lo devuelto
-        total_neto = max(0, total - monto_dev)
+        total_neto = max(0.0, float(total) - float(monto_dev))
 
         top_prod = self.app.db.obtener_top_productos(i, f)
         ultimas = self.app.db.obtener_ultimas_ventas_detalladas(i, f)
@@ -142,12 +142,6 @@ class ReportesFrame(ctk.CTkFrame):
         # Fila inferior para Top Productos y Torta dividiendo mitad y mitad
         bottom_charts_frame = ctk.CTkFrame(self.charts_container, fg_color="transparent")
         bottom_charts_frame.pack(fill="both", expand=True)
-
-        header_prod = ctk.CTkFrame(bottom_charts_frame, fg_color="transparent")
-        header_prod.pack(fill="x")
-        ctk.CTkButton(header_prod, text="📥 Excel Productos", width=120, fg_color="#217346", hover_color="#1E613B",
-                    command=lambda: self.exportar_a_excel(top_prod, ["Producto", "Cantidad"], "Top_Productos")
-                    ).pack(side="right")
 
         # --- Gráfica 1: Líneas (Ventas por Hora) EN EL TOP ---
         ventas_hora = self.app.db.obtener_ventas_por_hora(i, f)

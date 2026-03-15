@@ -36,6 +36,31 @@ class VentasFrame(ctk.CTkFrame):
             font=("Segoe UI", 12, "bold")
         )
 
+        self.pack(fill="both", expand=True, padx=20, pady=10)
+
+        # 1. PANEL INFERIOR (Lo declaramos PRIMERO para que se quede abajo)
+        panel_inf = ctk.CTkFrame(self, fg_color="#1E1E1E", corner_radius=15, height=90)
+        panel_inf.pack(fill="x", side="bottom", pady=(10, 0)) # <--- Va al fondo
+        panel_inf.pack_propagate(False)
+
+        # Contenedor de Totales (Izquierda)
+        totales_frame = ctk.CTkFrame(panel_inf, fg_color="transparent")
+        totales_frame.pack(side="left", padx=20, pady=15)
+
+        self.lbl_total = ctk.CTkLabel(totales_frame, text="TOTAL: $ 0.00", font=("Segoe UI", 36, "bold"), text_color="#00E676")
+        self.lbl_total.pack(side="left", padx=(0, 15))
+
+        self.lbl_total_bs = ctk.CTkLabel(totales_frame, text="0.00 Bs", font=("Segoe UI", 22, "bold"), text_color="#FFB300")
+        self.lbl_total_bs.pack(side="left", pady=(10, 0)) # Ligero ajuste hacia abajo
+
+        # Contenedor de Botones (Derecha)
+        btn_frame = ctk.CTkFrame(panel_inf, fg_color="transparent")
+        btn_frame.pack(side="right", padx=20, pady=15)
+
+        ctk.CTkButton(btn_frame, text="🧹 Vaciar", fg_color="transparent", hover_color="#331111", border_width=1, border_color="#FF1744", text_color="#FF1744", command=self.vaciar_carrito, width=110, height=45, font=("Segoe UI", 14, "bold"), corner_radius=8).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="🗑️ Eliminar Prod.", fg_color="#D32F2F", hover_color="#B71C1C", command=self.eliminar_item_seleccionado, width=140, height=45, font=("Segoe UI", 14, "bold"), corner_radius=8).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="💳 PROCESAR PAGO", fg_color="#2979FF", hover_color="#1565C0", command=self.cobrar, width=200, height=55, font=("Segoe UI", 16, "bold"), corner_radius=8).pack(side="left", padx=(15, 0))
+
         # --- PANEL SUPERIOR ---
         self.top_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.top_frame.pack(fill="x", pady=(0, 15))
@@ -101,37 +126,21 @@ class VentasFrame(ctk.CTkFrame):
         self.tree.bind("=", lambda e: self.cambiar_cantidad_teclado(1))
         self.tree.bind("<KP_Subtract>", lambda e: self.cambiar_cantidad_teclado(-1))
         self.tree.bind("-", lambda e: self.cambiar_cantidad_teclado(-1))
-
-        # --- PANEL INFERIOR: TOTALES Y ACCIONES ---
-        panel_inf = ctk.CTkFrame(self, fg_color="#1E1E1E", corner_radius=15, height=90)
-        panel_inf.pack(fill="x", side="bottom", pady=(10, 0))
-        panel_inf.pack_propagate(False) # Mantener altura fija
-
-        # Contenedor de Totales (Izquierda)
-        totales_frame = ctk.CTkFrame(panel_inf, fg_color="transparent")
-        totales_frame.pack(side="left", padx=20, pady=15)
-
-        self.lbl_total = ctk.CTkLabel(totales_frame, text="TOTAL: $ 0.00", font=("Segoe UI", 36, "bold"), text_color="#00E676")
-        self.lbl_total.pack(side="left", padx=(0, 15))
-
-        self.lbl_total_bs = ctk.CTkLabel(totales_frame, text="0.00 Bs", font=("Segoe UI", 22, "bold"), text_color="#FFB300")
-        self.lbl_total_bs.pack(side="left", pady=(10, 0)) # Ligero ajuste hacia abajo
-
-        # Contenedor de Botones (Derecha)
-        btn_frame = ctk.CTkFrame(panel_inf, fg_color="transparent")
-        btn_frame.pack(side="right", padx=20, pady=15)
-
-        ctk.CTkButton(btn_frame, text="🧹 Vaciar", fg_color="transparent", hover_color="#331111", border_width=1, border_color="#FF1744", text_color="#FF1744", command=self.vaciar_carrito, width=110, height=45, font=("Segoe UI", 14, "bold"), corner_radius=8).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="🗑️ Eliminar Prod.", fg_color="#D32F2F", hover_color="#B71C1C", command=self.eliminar_item_seleccionado, width=140, height=45, font=("Segoe UI", 14, "bold"), corner_radius=8).pack(side="left", padx=5)
-        ctk.CTkButton(btn_frame, text="💳 PROCESAR PAGO", fg_color="#2979FF", hover_color="#1565C0", command=self.cobrar, width=200, height=55, font=("Segoe UI", 16, "bold"), corner_radius=8).pack(side="left", padx=(15, 0))
+        
 
     # --- MÉTODO PARA EL CIERRE ---
     def ejecutar_cierre_desde_interfaz(self):
+        
+        usuario_id = self.app.usuario_actual[0]
+        
+        # Importamos el módulo de cierre
+        from modulo_cierre import realizar_cierre
+        
         try:
-            archivo = realizar_cierre() # <--- Si esto falla, el botón se bloquea
-            messagebox.showinfo("Cierre Exitoso", f"El reporte se generó en: {archivo}")
+            pdf = realizar_cierre(usuario_id)
+            messagebox.showinfo("Cierre", f"Cierre generado: {pdf}")
         except Exception as e:
-            messagebox.showerror("Error", f"No se pudo generar el cierre: {e}")
+            messagebox.showerror("Error", f"Fallo al cerrar: {e}")
 
     # --- LÓGICA DE BÚSQUEDA Y CARRITO ---
 

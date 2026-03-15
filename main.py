@@ -1,5 +1,4 @@
 from tkinter import messagebox
-
 import customtkinter as ctk
 from database import Database
 from bcv_tasa import obtener_tasa_bcv
@@ -12,6 +11,9 @@ from vistas_usuarios import UsuariosFrame
 from vistas_compras import ComprasFrame
 from vistas_devoluciones import DevolucionesFrame
 from utilidades import parse_monto
+from vistas_caja import CajaChicaFrame
+from vistas_proveedores import ProveedoresFrame
+from vistas_gastos import GastosFrame
 
 class MyMPos(ctk.CTk):
     def __init__(self):
@@ -74,8 +76,14 @@ class MyMPos(ctk.CTk):
         self.mostrar_dashboard()
 
     def ir(self, clase_frame):
+        print(f"Cargando: {clase_frame.__name__}")
         self.limpiar()
-        clase_frame(self.contenedor, self)
+        try:
+            # Aquí pasamos 'self' para que la vista tenga acceso a la BD
+            clase_frame(self.contenedor, self)
+        except Exception as e:
+            print(f"ERROR AL CARGAR VISTA: {e}")
+            self.mostrar_dashboard()
 
     def limpiar(self):
         """Elimina todos los widgets dentro del contenedor principal"""
@@ -89,7 +97,7 @@ class MyMPos(ctk.CTk):
         
         # Frame contenedor
         container = ctk.CTkFrame(self.contenedor, fg_color="transparent")
-        container.pack(expand=True, fill="both", padx=20, pady=20)
+        container.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Título en el dashboard - Más interactivo y llamativo
         header = ctk.CTkFrame(container, fg_color="transparent")
@@ -130,8 +138,14 @@ class MyMPos(ctk.CTk):
         animate_header()
 
         # Grid para los botones
-        grid_frame = ctk.CTkFrame(container, fg_color="transparent")
-        grid_frame.pack(expand=True)
+        grid_frame = ctk.CTkScrollableFrame(
+            container, 
+            fg_color="transparent"
+        )
+        grid_frame.pack(side="left", fill="both", expand=True, padx=20, pady=10)
+
+        # 2. Configura las columnas para que siempre haya 3 cuadros por fila (ajustable)
+        grid_frame.columnconfigure((0, 1, 2), weight=1)
 
         rol = self.usuario_actual[3] if self.usuario_actual else "Cajero"
         
@@ -139,10 +153,13 @@ class MyMPos(ctk.CTk):
             ("VENTAS", "🛒", "#00E676", VentasFrame, "Procesar y registrar ventas"),
             ("STOCK", "📦", "#AA00FF", InventarioFrame, "Gestión del inventario"),
             ("COMPRAS", "➕", "#FF5252", ComprasFrame, "Entrada de mercancía nueva"),
-            ("DEVOLUCIÓN", "🔄", "#F44336", DevolucionesFrame, "Gestión de reclamos y cambios"),
+            ("PROVEEDORES", "🤝", "#76FF03", ProveedoresFrame, "Directorio y contactos"), # NUEVO
+            ("GASTOS", "💸", "#FF3D00", GastosFrame, "Registro de gastos operativos"),   # NUEVO
+            ("DEVOLUCIÓN", "🔄", "#F44336", DevolucionesFrame, "Gestión de reclamos"),
             ("PRECIOS", "💰", "#FFD600", PreciosFrame, "Consulta rápida de precios"),
             ("REPORTES", "📊", "#2979FF", ReportesFrame, "Métricas y movimientos"),
-            ("USUARIOS", "👤", "#00BCD4", UsuariosFrame, "Gestión de personal")
+            ("USUARIOS", "👤", "#00BCD4", UsuariosFrame, "Gestión de personal"),
+            ("CAJA CHICA", "💵", "#FF9800", CajaChicaFrame, "Control de entradas y salidas"),
         ]
 
         # Filtrado por privilegios solicitado:
@@ -150,14 +167,17 @@ class MyMPos(ctk.CTk):
         if rol == "Cajero":
             permitidos = ["VENTAS", "COMPRAS", "PRECIOS", "DEVOLUCIÓN"]
             opciones = [opt for opt in opciones_full if opt[0] in permitidos]
-            cols = 2 # 2x2 para cajeros
+            cols = 2 
         else:
             opciones = opciones_full
-            cols = 3 # 3-2-2 o similar para Admins
+            cols = 3 
 
+        # DIBUJADO DINÁMICO (Esto arregla el error de filas/columnas)
         for i, (txt, ico, col, frame, desc) in enumerate(opciones):
+            fila = i // cols
+            columna = i % cols
             btn = self.crear_boton(grid_frame, txt, ico, col, desc, lambda f=frame: self.ir(f))
-            btn.grid(row=i//cols, column=i%cols, padx=10, pady=10)
+            btn.grid(row=fila, column=columna, padx=15, pady=15, sticky="nsew")
 
     def crear_boton(self, master, texto, icono, color, desc, comando):
         import math
@@ -219,26 +239,22 @@ class MyMPos(ctk.CTk):
                 
         return AnimatedButton(master, texto, icono, color, desc, comando)
     
-    def boton_cierre_caja(self):
-        from modulo_cierre import realizar_cierre
-        try:
-            pdf = realizar_cierre()
-            messagebox.showinfo("Cierre", f"Cierre generado con éxito: {pdf}")
-        except Exception as e:
-            messagebox.showerror("Error", f"No se pudo cerrar la caja: {e}")
-
 def crear_contenedor_vista(self, titulo):
-    # Esto crea un header estilizado para cada sección
-    header = ctk.CTkFrame(self.contenedor, fg_color="transparent")
-    header.pack(fill="x", pady=(0, 20))
-    
-    ctk.CTkLabel(header, text=titulo, font=("Segoe UI", 24, "bold")).pack(side="left")
-    
-    # Botón de volver al home
-    ctk.CTkButton(header, text="⬅ Volver", width=80, fg_color="#333333", 
-                  command=self.mostrar_dashboard).pack(side="right")
-    
-    return self.contenedor
+        header = ctk.CTkFrame(self.contenedor, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 20))
+        ctk.CTkLabel(header, text=titulo, font=("Segoe UI", 24, "bold")).pack(side="left")
+        ctk.CTkButton(header, text="⬅ Volver", width=80, fg_color="#333333", 
+                      command=self.mostrar_dashboard).pack(side="right")
+        return self.contenedor
+def ir(self, clase_frame):
+        print(f"Intentando cargar: {clase_frame.__name__}") # Esto te dirá si al menos se llama
+        self.limpiar()
+        try:
+            clase_frame(self.contenedor, self)
+        except Exception as e:
+            print(f"ERROR AL CARGAR LA VISTA: {e}")
+            # Si falla, vuelve al dashboard para no dejar la pantalla negra
+            self.mostrar_dashboard()
 
 if __name__ == "__main__":
     app = MyMPos()

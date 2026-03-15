@@ -1,3 +1,4 @@
+from datetime import datetime
 import os
 import re
 import psycopg2
@@ -418,22 +419,47 @@ class Database:
             cur.execute(query, (inicio, fin))
             return cur.fetchall()
             
-    def obtener_cierre_cajero(self, usuario_id, fecha=None):
+    def obtener_cierre_integral(self, usuario_id, fecha=None):
         if not fecha:
             from datetime import date
             fecha = date.today()
+        
         try:
             with self.get_cursor() as cur:
+                # 1. Ventas (Ya filtrado por vendedor)
                 cur.execute("""
-                    SELECT metodo_pago, SUM(total) as monto, COUNT(id) as cantidad
-                    FROM public.ventas WHERE vendedor_id::text = %s AND fecha::date = %s
+                    SELECT 'VENTA' as categoria, metodo_pago as subcategoria, SUM(total) as monto
+                    FROM public.ventas 
+                    WHERE vendedor_id::text = %s AND fecha::date = %s
                     GROUP BY metodo_pago
                 """, (str(usuario_id), fecha))
-                return cur.fetchall()
+                ventas = cur.fetchall()
+
+                # 2. Caja Chica
+                cur.execute("""
+                    SELECT 'CAJA_CHICA' as categoria, tipo as subcategoria, SUM(monto) as monto
+                    FROM public.caja_chica 
+                    WHERE fecha::date = %s AND usuario_id = %s
+                    GROUP BY tipo
+                """, (fecha, usuario_id))
+                caja = cur.fetchall()
+                
+                return ventas + caja
         except Exception as e:
-            print(f"Error calculando cierre: {e}")
+            print(f"Error calculando cierre integral: {e}")
             return []
 
+    def registrar_caja_chica(self, tipo, concepto, monto):
+        try:
+            with self.get_cursor() as cur:
+                # Usamos los nombres de columna de tu tabla
+                query = "INSERT INTO public.caja_chica (tipo, concepto, monto) VALUES (%s, %s, %s)"
+                cur.execute(query, (tipo, concepto, monto))
+                return True
+        except Exception as e:
+            print(f"Error BD: {e}")
+            return False
+        
     def registrar_nuevo_usuario(self, username, nombre, password_hash, rol):
         try:
             with self.get_cursor() as cur:
@@ -528,4 +554,30 @@ class Database:
                 cur.execute(query, (inicio, fin))
                 return cur.fetchall()
         except: return []
+    
+    def obtener_resumen_ganancias(self, fecha_inicio, fecha_fin):
+        with self.get_cursor() as cur:
+            cur.execute("""
+                SELECT 
+                    (SELECT COALESCE(SUM(total), 0) FROM public.ventas WHERE fecha BETWEEN %s AND %s) as ventas,
+                    (SELECT COALESCE(SUM(monto), 0) FROM public.gastos WHERE fecha BETWEEN %s AND %s) as gastos,
+                    (SELECT COALESCE(SUM(monto), 0) FROM public.compras WHERE fecha BETWEEN %s AND %s) as compras
+            """, (fecha_inicio, fecha_fin, fecha_inicio, fecha_fin, fecha_inicio, fecha_fin))
+            
+            resultado = cur.fetchone()
+            ventas, gastos, compras = resultado
+            utilidad = ventas - (gastos + compras)
+            
+            return {
+                "ventas": float(ventas),
+                "gastos": float(gastos),
+                "compras": float(compras),
+                "utilidad_neta": float(utilidad)
+            }
+
+# Asegúrate de tener este método que causó el error en ProveedoresFrame
+    def fetchall(self, query, params=None):
+        with self.get_cursor() as cur:
+            cur.execute(query, params or ())
+            return cur.fetchall()
 # .\.venv\Scripts\activate.bat
