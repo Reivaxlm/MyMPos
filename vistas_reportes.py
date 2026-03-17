@@ -224,6 +224,45 @@ class ReportesFrame(ctk.CTkFrame):
         )
 
         for w in self.table_f.winfo_children(): w.destroy()
+
+        # --- NUEVA GRÁFICA: BALANCE DE GANANCIAS (Matplotlib) ---
+        # 1. Creamos un frame para esta gráfica específica al final de charts_container
+        balance_frame = ctk.CTkFrame(self.charts_container, fg_color="transparent")
+        balance_frame.pack(fill="x", pady=(20, 0))
+
+        # 2. Llamamos a tu función de base de datos
+        data = self.app.db.obtener_balance_ganancias(rango)
+        
+        # 3. Configuramos la figura igual que tus otras gráficas
+        fig4, ax4 = plt.subplots(figsize=(10, 3), dpi=85, facecolor='#121212')
+        ax4.set_facecolor('#1e1e1e')
+
+        etiquetas = ['INGRESOS', 'EGRESOS (Costos+Gastos)', 'GANANCIA NETA']
+        valores = [data['ingresos'], data['egresos'], data['neta']]
+        colores = ['#00E676', '#FF5252', '#2979FF'] # Verde, Rojo, Azul
+
+        # Creamos barras horizontales
+        barras = ax4.barh(etiquetas, valores, color=colores)
+        
+        # Estética de la gráfica
+        ax4.set_title(f"ESTADO DE RESULTADOS ({rango})", color='white', size=11, weight='bold', pad=15)
+        ax4.tick_params(colors='white', labelsize=9)
+        
+        # Añadir los montos en texto al lado de cada barra
+        for i, v in enumerate(valores):
+            ax4.text(v + (max(valores)*0.01), i, f" $ {v:,.2f}", 
+                     color='white', va='center', fontweight='bold', fontsize=10)
+
+        # Quitar líneas de los bordes para que se vea moderno
+        for spine in ax4.spines.values():
+            spine.set_visible(False)
+        
+        ax4.grid(axis='x', linestyle='--', alpha=0.1)
+        plt.tight_layout()
+
+        # 4. Dibujar en la interfaz
+        canvas4 = FigureCanvasTkAgg(fig4, master=balance_frame)
+        canvas4.get_tk_widget().pack(fill="both", expand=True)
         
         # Header con título y botón de exportar
         header_tabla = ctk.CTkFrame(self.table_f, fg_color="transparent")

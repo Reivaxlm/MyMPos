@@ -9,7 +9,7 @@ load_dotenv()
 
 class Database:
     def __init__(self):
-        # Leer configuración desde variables de entorno
+        # 1. configuración de conexión
         self.config = {
             "host": os.getenv("DB_HOST", "aws-1-us-east-1.pooler.supabase.com"),
             "port": os.getenv("DB_PORT", "6543"),
@@ -17,6 +17,34 @@ class Database:
             "user": os.getenv("DB_USER", "postgres.zkjxmopqdbwuqdnjnnji"),
             "password": os.getenv("DB_PASSWORD", "Megapostgrs")
         }
+        
+        # 2. CREAR LA CONEXIÓN
+        try:
+            self.conexion = psycopg2.connect(**self.config)
+            self.conexion.autocommit = True
+            print("Conexión exitosa a Supabase")
+        except Exception as e:
+            print(f"Error conectando a la base de datos: {e}")
+
+    # 3. Método para obtener una sola fila (Usa self.conexion)
+    def fetchone(self, query, params=None):
+        try:
+            with self.conexion.cursor() as cursor:
+                cursor.execute(query, params or ())
+                return cursor.fetchone()
+        except Exception as e:
+            print(f"Error en fetchone: {e}")
+            return None
+
+    # 4. Método para obtener muchas filas (Usa self.conexion)
+    def fetchall(self, query, params=None):
+        try:
+            with self.conexion.cursor() as cursor:
+                cursor.execute(query, params or ())
+                return cursor.fetchall()
+        except Exception as e:
+            print(f"Error en fetchall: {e}")
+            return []
 
     @contextmanager
     def get_cursor(self):
@@ -574,10 +602,48 @@ class Database:
                 "compras": float(compras),
                 "utilidad_neta": float(utilidad)
             }
+    
+    def obtener_balance_ganancias(self, rango="HOY"):
+        # Definir el filtro de fecha según el botón
+        filtros = {
+            "HOY": "CURRENT_DATE",
+            "SEMANA": "CURRENT_DATE - INTERVAL '7 days'",
+            "MES": "CURRENT_DATE - INTERVAL '30 days'"
+        }
+        fecha_limite = filtros.get(rango, "CURRENT_DATE")
+        
+        try:
+            # 1. Ventas con filtro
+            res_ventas = self.fetchone(f"SELECT SUM(total) FROM public.ventas WHERE fecha >= {fecha_limite}")
+            total_ventas = float(res_ventas[0] or 0)
 
-# Asegúrate de tener este método que causó el error en ProveedoresFrame
-    def fetchall(self, query, params=None):
-        with self.get_cursor() as cur:
-            cur.execute(query, params or ())
-            return cur.fetchall()
+            # 2. Costo de mercancía con filtro
+            query_costos = f"""
+                SELECT SUM(dv.cantidad * p.precio_compra) 
+                FROM public.detalle_ventas dv
+                JOIN public.productos p ON dv.producto_id = p.id
+                JOIN public.ventas v ON dv.venta_id = v.id
+                WHERE v.fecha >= {fecha_limite}
+            """
+            res_costos = self.fetchone(query_costos)
+            total_costo_mercancia = float(res_costos[0] or 0)
+
+            # 3. Gastos con filtro
+            res_gastos = self.fetchone(f"SELECT SUM(monto) FROM public.gastos WHERE fecha >= {fecha_limite}")
+            total_gastos = float(res_gastos[0] or 0)
+
+            # 4. Caja Chica con filtro
+            res_caja = self.fetchone(f"SELECT SUM(monto) FROM public.caja_chica WHERE UPPER(tipo) = 'SALIDA' AND fecha >= {fecha_limite}")
+            total_salidas_caja = float(res_caja[0] or 0)
+
+            total_egresos = total_costo_mercancia + total_gastos + total_salidas_caja
+            return {
+                "ingresos": total_ventas,
+                "egresos": total_egresos,
+                "neta": total_ventas - total_egresos,
+                "detalle_egresos": {"mercancia": total_costo_mercancia, "operativos": total_gastos, "caja": total_salidas_caja}
+            }
+        except Exception as e:
+            print(f"Error: {e}")
+            return {"ingresos": 0, "egresos": 0, "neta": 0, "detalle_egresos": {}}
 # .\.venv\Scripts\activate.bat

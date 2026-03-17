@@ -76,14 +76,31 @@ class MyMPos(ctk.CTk):
         self.mostrar_dashboard()
 
     def ir(self, clase_frame):
-        print(f"Cargando: {clase_frame.__name__}")
+        """Limpia el contenedor y carga la nueva vista"""
+        print(f"Intentando cargar: {clase_frame.__name__}")
         self.limpiar()
         try:
-            # Aquí pasamos 'self' para que la vista tenga acceso a la BD
-            clase_frame(self.contenedor, self)
+            # Creamos el encabezado con el botón volver automáticamente
+            titulo = clase_frame.__name__.replace("Frame", "").upper()
+            contenedor_con_header = self.crear_contenedor_vista(titulo)
+            
+            # Instanciamos la vista dentro del contenedor
+            clase_frame(contenedor_con_header, self)
         except Exception as e:
-            print(f"ERROR AL CARGAR VISTA: {e}")
+            print(f"ERROR CRÍTICO AL CARGAR LA VISTA: {e}")
             self.mostrar_dashboard()
+
+    def crear_contenedor_vista(self, titulo):
+        """Crea un encabezado estándar para todas las vistas"""
+        header = ctk.CTkFrame(self.contenedor, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 20))
+        
+        ctk.CTkLabel(header, text=titulo, font=("Segoe UI", 24, "bold")).pack(side="left")
+        
+        ctk.CTkButton(header, text="⬅ Volver", width=80, fg_color="#333333", 
+                      command=self.mostrar_dashboard).pack(side="right")
+        
+        return self.contenedor
 
     def limpiar(self):
         """Elimina todos los widgets dentro del contenedor principal"""
@@ -172,8 +189,8 @@ class MyMPos(ctk.CTk):
             opciones = opciones_full
             cols = 3 
 
-        # DIBUJADO DINÁMICO (Esto arregla el error de filas/columnas)
         for i, (txt, ico, col, frame, desc) in enumerate(opciones):
+            # Usamos 'cols' para calcular la posición exacta
             fila = i // cols
             columna = i % cols
             btn = self.crear_boton(grid_frame, txt, ico, col, desc, lambda f=frame: self.ir(f))

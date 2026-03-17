@@ -1,49 +1,72 @@
 import customtkinter as ctk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 
 class CajaChicaFrame(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, fg_color="transparent")
         self.app = app
-        self.pack(fill="both", expand=True)
-        
-        # Tarjeta principal que ocupa espacio pero permite scroll interno
-        self.card = ctk.CTkFrame(self, fg_color="#1A1A1A", corner_radius=15)
-        self.card.place(relx=0.5, rely=0.5, anchor="center", relwidth=0.7, relheight=0.75)
-        
         self.setup_ui()
+        self.cargar_movimientos()
 
     def setup_ui(self):
-        # Título
-        ctk.CTkLabel(self.card, text="Movimiento de Caja", font=("Segoe UI", 24, "bold")).pack(pady=(20, 10))
+        self.pack(fill="both", expand=True, padx=20, pady=10)
+        
+        # --- ESTILO OSCURO PARA TABLA ---
+        style = ttk.Style()
+        style.theme_use("default")
+        style.configure("Treeview",
+            background="#1E1E1E",
+            foreground="white",
+            fieldbackground="#1E1E1E",
+            rowheight=35,
+            font=("Segoe UI", 11)
+        )
+        style.configure("Treeview.Heading",
+            background="#252525",
+            foreground="white",
+            relief="flat",
+            font=("Segoe UI", 12, "bold")
+        )
 
-        # Selector
-        self.seg_button = ctk.CTkSegmentedButton(self.card, values=["Entrada", "Salida"], 
-                                                 command=self.cambiar_modo, height=45,
-                                                 selected_color="#2979FF", unselected_color="#0F0F0F")
-        self.seg_button.pack(pady=10, padx=40, fill="x")
+        container = ctk.CTkFrame(self, fg_color="transparent")
+        container.pack(fill="both", expand=True)
+
+        # Formulario (Izquierda)
+        form = ctk.CTkFrame(container, fg_color="#1E1E1E", width=320, corner_radius=15)
+        form.pack(side="left", fill="y", padx=(0, 20))
+        form.pack_propagate(False)
+        
+        ctk.CTkLabel(form, text="💵 CAJA CHICA", font=("Segoe UI", 20, "bold"), text_color="#FFB300").pack(pady=25)
+
+        self.seg_button = ctk.CTkSegmentedButton(form, values=["Entrada", "Salida"], 
+                                                 height=40, selected_color="#2979FF",
+                                                 command=self.cambiar_modo)
+        self.seg_button.pack(pady=10, padx=20, fill="x")
         self.seg_button.set("Entrada")
-        
-        # --- AQUÍ ESTÁ EL CAMBIO: ScrollableFrame para que el contenido no se corte ---
-        self.scroll_frame = ctk.CTkScrollableFrame(self.card, fg_color="transparent")
-        self.scroll_frame.pack(pady=10, padx=40, fill="both", expand=True)
 
-        self.combo_categoria = ctk.CTkOptionMenu(self.scroll_frame, values=["Aporte de cambio", "Cobro de deuda"], 
-                                                 height=50, fg_color="#0F0F0F", button_color="#2979FF")
-        self.combo_categoria.pack(pady=10, fill="x")
+        self.combo_categoria = ctk.CTkOptionMenu(form, values=["Aporte de cambio", "Cobro de deuda"], height=45)
+        self.combo_categoria.pack(pady=10, padx=20, fill="x")
 
-        self.ent_monto = ctk.CTkEntry(self.scroll_frame, placeholder_text="Monto ($)", height=50, fg_color="#0F0F0F", border_width=0)
-        self.ent_monto.pack(pady=10, fill="x")
+        self.ent_monto = ctk.CTkEntry(form, placeholder_text="Monto ($)", height=45)
+        self.ent_monto.pack(pady=10, padx=20, fill="x")
 
-        self.ent_ref = ctk.CTkEntry(self.scroll_frame, placeholder_text="Descripción", height=50, fg_color="#0F0F0F", border_width=0)
-        self.ent_ref.pack(pady=10, fill="x")
+        self.ent_ref = ctk.CTkEntry(form, placeholder_text="Descripción", height=45)
+        self.ent_ref.pack(pady=10, padx=20, fill="x")
        
-        self.btn_guardar = ctk.CTkButton(self.card, text="REGISTRAR MOVIMIENTO", height=60, 
-                                         fg_color="#2979FF", hover_color="#1e5cb3",
-                                         font=("Segoe UI", 16, "bold"), 
-                                         command=self.guardar_movimiento)
-        self.btn_guardar.pack(pady=(10, 20), padx=40, fill="x")
+        ctk.CTkButton(form, text="REGISTRAR", height=50, fg_color="#2979FF", 
+                      font=("Segoe UI", 14, "bold"), command=self.guardar_movimiento).pack(pady=30, padx=20, fill="x")
+
+        # Historial (Derecha)
+        historial = ctk.CTkFrame(container, fg_color="#1E1E1E", corner_radius=15)
+        historial.pack(side="right", fill="both", expand=True)
         
+        columnas = ("Fecha", "Tipo", "Concepto", "Monto")
+        self.tree = ttk.Treeview(historial, columns=columnas, show="headings", style="Treeview")
+        for col in columnas:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, anchor="center")
+        self.tree.pack(fill="both", expand=True, padx=10, pady=10)
+
     def cambiar_modo(self, valor):
         if valor == "Entrada":
             self.combo_categoria.configure(values=["Aporte de cambio", "Cobro de deuda", "Otros"])
@@ -52,16 +75,22 @@ class CajaChicaFrame(ctk.CTkFrame):
         self.combo_categoria.set(self.combo_categoria._values[0])
 
     def guardar_movimiento(self):
-        monto = self.ent_monto.get()
-        concepto = self.combo_categoria.get()
-        tipo = self.seg_button.get().upper()
-        # Obtenemos el ID del usuario desde la app
-        usuario_id = self.app.usuario_actual[0] 
-        
-        # Debes implementar este método en database.py para guardar el usuario_id
-        exito = self.app.db.registrar_caja_chica(tipo, concepto, monto, usuario_id)
-        
-        if exito:
-            messagebox.showinfo("Éxito", "Movimiento registrado")
-        else:
-            messagebox.showerror("Error", "No se pudo guardar")
+        try:
+            monto = self.ent_monto.get()
+            concepto = self.combo_categoria.get()
+            tipo = self.seg_button.get().upper()
+            usuario_id = self.app.usuario_actual[0] 
+            
+            if self.app.db.registrar_caja_chica(tipo, concepto, monto, usuario_id):
+                messagebox.showinfo("Éxito", "Movimiento registrado")
+                self.ent_monto.delete(0, 'end'); self.ent_ref.delete(0, 'end')
+                self.cargar_movimientos()
+        except Exception as e:
+            messagebox.showerror("Error", f"Error: {e}")
+
+    def cargar_movimientos(self):
+        for i in self.tree.get_children(): self.tree.delete(i)
+        try:
+            data = self.app.db.fetchall("SELECT fecha, tipo, concepto, monto FROM public.caja_chica ORDER BY id DESC LIMIT 50")
+            for row in data: self.tree.insert("", "end", values=row)
+        except: pass
